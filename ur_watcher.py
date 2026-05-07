@@ -44,7 +44,7 @@ SEARCH_SOURCES = [
         "url": "https://www.ur-net.go.jp/chintai/tokubetsu/",
         "label": "Special Listing (50% off rent)",
         "type": "tokubetsu",
-        "prefecture_filter": ["関東"],
+        "prefecture_filter": ["東京", "神奈川"],  # Tokyo and Kanagawa only
     },
 ]
 
@@ -56,7 +56,7 @@ ALLOWED_MADORI   = ["1R・1K", "1DK", "2K", "1LDK", "2LDK", "2DK"]
 GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS", "").strip()
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
 NOTIFY_EMAIL       = os.environ.get("NOTIFY_EMAIL", "").strip()
-LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN", "").strip()
+LINE_CHANNEL_TOKEN = "".join(os.environ.get("LINE_CHANNEL_TOKEN", "").split())  # removes all whitespace/newlines
 LINE_USER_ID       = os.environ.get("LINE_USER_ID", "").strip()
 DEBUG_MODE         = os.environ.get("DEBUG_MODE", "false").lower() == "true"
 STATE_FILE         = Path("seen_ids.json")
@@ -79,7 +79,7 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
         try:
             print(f"  Loading [{source_type}] {url}")
             page.goto(url, wait_until="domcontentloaded", timeout=120_000)
-            page.wait_for_timeout(4_000)
+            page.wait_for_timeout(8_000)
 
             if DEBUG_MODE:
                 page.screenshot(path=f"debug_{source_type}.png", full_page=True)
@@ -98,15 +98,15 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                     const results = [];
                     document.querySelectorAll('.js-tokubetsu-bukken-row').forEach(row => {
                         try {
-                            const bukken     = row.closest('.js-tokubetsu-bukken');
-                            const regionBlock = row.closest('.sec_tokubetsu_02');
-                            const prefEl     = regionBlock && regionBlock.querySelector('h2');
-                            const nameEl     = bukken && bukken.querySelector('h3, h4, [class*="name"], [class*="title"]');
-                            const pref       = prefEl ? prefEl.textContent.trim() : '';
-                            const name       = nameEl ? nameEl.textContent.trim() : '';
-                            const text       = row.innerText || '';
+                            const bukken    = row.closest('.js-tokubetsu-bukken');
+                            const tdfkBlock = row.closest('[class*="js-tokubetsu-tdfk"]');
+                            const prefEl    = tdfkBlock && tdfkBlock.querySelector('.js-tokubetsu-tdfk-name');
+                            const nameEl    = bukken && bukken.querySelector('h3, h4, [class*="name"], [class*="title"]');
+                            const pref      = prefEl ? prefEl.textContent.trim() : '';
+                            const name      = nameEl ? nameEl.textContent.trim() : '';
+                            const text      = row.innerText || '';
 
-                            // Filter out management fees (always under ¥10,000) to get actual rents
+                            // Filter out management fees (always under 10,000) to get actual rents
                             const allRents    = [...text.matchAll(/([\\d,]+)\\s*円/g)]
                                 .map(m => parseInt(m[1].replace(/,/g,'')))
                                 .filter(v => v > 10000);
