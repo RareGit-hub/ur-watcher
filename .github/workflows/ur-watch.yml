@@ -1,25 +1,23 @@
 name: UR Property Watcher
+
 on:
   schedule:
-    - cron: '*/15 * * * *'
-  workflow_dispatch:
+    - cron: '*/15 * * * *'   # runs every 15 minutes
+  workflow_dispatch:          # allows manual trigger from the GitHub UI
     inputs:
       debug_mode:
         description: 'Enable debug mode (saves screenshot + HTML)'
         type: boolean
         default: false
+
 jobs:
   watch:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
       - uses: actions/checkout@v4
-      - name: Test UR site accessibility
-        run: |
-          echo "Response code:"
-          curl -I -o /dev/null -w "%{http_code}" "https://www.ur-net.go.jp/chintai/kanto/tokyo/result/?tdfk=13&walk=15&bus=1&block=kanto&tdfkNm=%E6%9D%B1%E4%BA%AC%E9%83%BD&tdfkCd=13&station_cd1=2334&station_cost1=40&station_change1=0"
-          echo ""
 
       - uses: actions/setup-python@v5
         with:
@@ -63,5 +61,4 @@ jobs:
           git config user.name  "ur-watcher-bot"
           git config user.email "actions@github.com"
           git add seen_ids.json
-          git diff --staged --quiet || git commit -m "chore: update seen_ids [skip ci]"
-          git push
+          git diff --staged --quiet || (git commit -m "chore: update seen_ids [skip ci]" && git pull --rebase && git push)
