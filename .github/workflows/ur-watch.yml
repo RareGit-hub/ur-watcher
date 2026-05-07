@@ -15,6 +15,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Test UR site accessibility
+        run: |
+          echo "Response code:"
+          curl -I -o /dev/null -w "%{http_code}" "https://www.ur-net.go.jp/chintai/kanto/tokyo/result/?tdfk=13&walk=15&bus=1&block=kanto&tdfkNm=%E6%9D%B1%E4%BA%AC%E9%83%BD&tdfkCd=13&station_cd1=2334&station_cost1=40&station_change1=0"
+          echo ""
 
       - uses: actions/setup-python@v5
         with:
