@@ -1,0 +1,58 @@
+name: UR Property Watcher
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # runs every 15 minutes
+  workflow_dispatch:          # allows manual trigger from the GitHub UI
+    inputs:
+      debug_mode:
+        description: 'Enable debug mode (saves screenshot + HTML)'
+        type: boolean
+        default: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Run watcher
+        env:
+          GMAIL_ADDRESS:      ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_EMAIL:       ${{ secrets.NOTIFY_EMAIL }}
+          LINE_NOTIFY_TOKEN:  ${{ secrets.LINE_NOTIFY_TOKEN }}
+          DEBUG_MODE:         ${{ github.event.inputs.debug_mode || 'false' }}
+        run: python ur_watcher.py
+
+      - name: Upload debug files
+        if: ${{ github.event.inputs.debug_mode == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-output
+          path: |
+            debug_regular.png
+            debug_regular.html
+            debug_tokubetsu.png
+            debug_tokubetsu.html
+
+      - name: Commit updated state
+        run: |
+          git config user.name  "ur-watcher-bot"
+          git config user.email "actions@github.com"
+          git add seen_ids.json
+          git diff --staged --quiet || git commit -m "chore: update seen_ids [skip ci]"
+          git push
