@@ -74,7 +74,7 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
         ).new_page()
         try:
             print(f"  Loading [{source_type}] {url[:80]}...")
-            page.goto(url, wait_until="networkidle", timeout=60_000)
+            page.goto(url, wait_until="networkidle", timeout=120_000)
             page.wait_for_timeout(4_000)
 
             if DEBUG_MODE:
