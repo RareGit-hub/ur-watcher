@@ -2,7 +2,7 @@ name: UR Property Watcher
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # runs every 15 minutes
+    - cron: '*/15 * * * *'   # updated   # runs every 15 minutes
   workflow_dispatch:          # allows manual trigger from the GitHub UI
     inputs:
       debug_mode:
