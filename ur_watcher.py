@@ -53,17 +53,17 @@ ALLOWED_MADORI   = ["1R・1K", "1DK", "2K", "1LDK", "2LDK", "2DK"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS", "")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
-NOTIFY_EMAIL       = os.environ.get("NOTIFY_EMAIL", "")
-LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN", "")
-LINE_USER_ID       = os.environ.get("LINE_USER_ID", "")
+GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS", "").strip()
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
+NOTIFY_EMAIL       = os.environ.get("NOTIFY_EMAIL", "").strip()
+LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN", "").strip()
+LINE_USER_ID       = os.environ.get("LINE_USER_ID", "").strip()
 DEBUG_MODE         = os.environ.get("DEBUG_MODE", "false").lower() == "true"
 STATE_FILE         = Path("seen_ids.json")
 
 
 def load_seen() -> set:
-    return set(json.loads(STATE_FILE.read_text())) if STATE_FILE.exists() else set()
+    return set(json.loads(STATE_FILE.read_text(encoding="utf-8"))) if STATE_FILE.exists() else set()
 
 def save_seen(seen: set) -> None:
     STATE_FILE.write_text(json.dumps(sorted(seen), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -98,16 +98,21 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                     const results = [];
                     document.querySelectorAll('.js-tokubetsu-bukken-row').forEach(row => {
                         try {
-                            const bukken = row.closest('.js-tokubetsu-bukken');
-                            const block  = row.closest('.sec_tokubetsu_02, .js-tokubetsu-block');
-                            const prefEl = block  && block.querySelector('h2, h3, [class*="title"]');
-                            const nameEl = bukken && bukken.querySelector('h3, h4, [class*="name"], [class*="title"]');
-                            const pref   = prefEl ? prefEl.textContent.trim() : '';
-                            const name   = nameEl ? nameEl.textContent.trim() : '';
-                            const text   = row.innerText || '';
-                            const allRents    = [...text.matchAll(/([\\d,]+)\\s*円/g)];
-                            const normalYen   = allRents[0] ? parseInt(allRents[0][1].replace(/,/g,'')) : 0;
-                            const discountYen = allRents[1] ? parseInt(allRents[1][1].replace(/,/g,'')) : normalYen;
+                            const bukken     = row.closest('.js-tokubetsu-bukken');
+                            const regionBlock = row.closest('.sec_tokubetsu_02');
+                            const prefEl     = regionBlock && regionBlock.querySelector('h2');
+                            const nameEl     = bukken && bukken.querySelector('h3, h4, [class*="name"], [class*="title"]');
+                            const pref       = prefEl ? prefEl.textContent.trim() : '';
+                            const name       = nameEl ? nameEl.textContent.trim() : '';
+                            const text       = row.innerText || '';
+
+                            // Filter out management fees (always under ¥10,000) to get actual rents
+                            const allRents    = [...text.matchAll(/([\\d,]+)\\s*円/g)]
+                                .map(m => parseInt(m[1].replace(/,/g,'')))
+                                .filter(v => v > 10000);
+                            const normalYen   = allRents[0] || 0;
+                            const discountYen = allRents[1] || normalYen;
+
                             const mado   = text.match(/([1-9][LDKSR]+|ワンルーム)/);
                             const sqm    = text.match(/([\\d.]+)\\s*㎡/);
                             const floor  = text.match(/([\\d]+)階/);
@@ -115,6 +120,7 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                             const link   = row.querySelector('a') || (bukken && bukken.querySelector('a'));
                             const href   = link ? (link.getAttribute('href') || '') : '';
                             const id     = ('tokubetsu_' + name + '_' + (mado ? mado[1] : '') + '_' + (floor ? floor[1] : '')).replace(/\\s/g,'');
+
                             results.push({
                                 id, name, pref,
                                 normal_rent_yen:  normalYen,
@@ -294,9 +300,6 @@ def main():
         for prop in scrape_listings(source["url"], source["label"], source["type"]):
             prop["prefecture_filter"] = source["prefecture_filter"]
             all_listings[prop["id"]] = prop
-
-    for p in all_listings.values():
-        print(f"  {p['name']} | {p['madori']} | ¥{p['rent_yen']:,} | {p['rent_man']}万")
 
     new_props = [
         p for p in all_listings.values()
