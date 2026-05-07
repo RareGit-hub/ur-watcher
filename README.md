@@ -1,2 +1,2 @@
 # ur-watcher
-Find appts
+Find Appartments
