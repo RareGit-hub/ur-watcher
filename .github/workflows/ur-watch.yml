@@ -1,21 +1,18 @@
 name: UR Property Watcher
-
 on:
   schedule:
-    - cron: '*/15 * * * *'   # runs every 15 minutes
-  workflow_dispatch:          # allows manual trigger from the GitHub UI
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
     inputs:
       debug_mode:
         description: 'Enable debug mode (saves screenshot + HTML)'
         type: boolean
         default: false
-
 jobs:
   watch:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -23,11 +20,13 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-   - name: Cache Playwright browsers
+
+      - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-1.50.0
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
@@ -38,7 +37,8 @@ jobs:
           GMAIL_ADDRESS:      ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL:       ${{ secrets.NOTIFY_EMAIL }}
-          LINE_NOTIFY_TOKEN:  ${{ secrets.LINE_NOTIFY_TOKEN }}
+          LINE_CHANNEL_TOKEN: ${{ secrets.LINE_CHANNEL_TOKEN }}
+          LINE_USER_ID:       ${{ secrets.LINE_USER_ID }}
           DEBUG_MODE:         ${{ github.event.inputs.debug_mode || 'false' }}
         run: python ur_watcher.py
 
