@@ -41,6 +41,12 @@ SEARCH_SOURCES = [
         "prefecture_filter": None,
     },
     {
+        "url": "https://www.ur-net.go.jp/chintai/kanto/kanagawa/result/?tdfk=14&walk=15&bus=1&block=kanto&tdfkNm=%E7%A5%9E%E5%A5%88%E5%B7%9D%E7%9C%8C&tdfkCd=14&station_cd1=3260&station_cost1=20&station_change1=0",
+        "label": "Regular",
+        "type": "regular",
+        "prefecture_filter": None,
+    },
+    {
         "url": "https://www.ur-net.go.jp/chintai/tokubetsu/",
         "label": "Special Listing (50% off rent)",
         "type": "tokubetsu",
