@@ -103,10 +103,10 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                             const pref      = prefEl ? prefEl.textContent.trim() : '';
 
                             // Use link text for property name (avoids picking up city headings)
-                            const nameLink  = bukken && bukken.querySelector('a[href*="/chintai/"]');
-                            const nameEl    = bukken && bukken.querySelector('h3, h4, [class*="name"], [class*="title"]');
-                            const name      = nameLink ? nameLink.textContent.trim() :
-                                             nameEl   ? nameEl.textContent.trim()   : '';
+                            const nameLink = row.querySelector('a[href*="/chintai/"]') || row.querySelector('a');
+                            const name     = nameLink
+                            ? nameLink.textContent.trim().replace(/[\s\u3000]+/g, ' ').trim()
+                            : '';
 
                             const text      = row.innerText || '';
                             const allRents  = [...text.matchAll(/([\\d,]+)\\s*円/g)]
@@ -119,8 +119,7 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                             const sqm    = text.match(/([\\d.]+)\\s*㎡/);
                             const floor  = text.match(/([\\d]+)階/);
                             const period = text.match(/(\\d+年)/);
-                            const link   = row.querySelector('a') || (bukken && bukken.querySelector('a'));
-                            const href   = link ? (link.getAttribute('href') || '') : '';
+                            const href   = nameLink ? (nameLink.getAttribute('href') || '') : '';
                             const id     = ('tokubetsu_' + name + '_' + (mado ? mado[1] : '') + '_' + (floor ? floor[1] : '')).replace(/\\s/g,'');
 
                             // Nearest stations from row text
