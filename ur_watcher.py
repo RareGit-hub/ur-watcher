@@ -49,7 +49,7 @@ SEARCH_SOURCES = [
 ]
 
 MAX_RENT_MAN_YEN = 15.0
-ALLOWED_MADORI   = ["1R・1K", "1DK", "1LDK", "2K", "2DK"]  # removed 2LDK
+ALLOWED_MADORI   = ["1R・1K", "1DK", "1LDK", "2K", "2DK"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -124,7 +124,8 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                                 madori:           mado   ? mado[1]            : '不明',
                                 sqm:              sqm    ? parseFloat(sqm[1]) : 0,
                                 discount_period:  period ? period[1]          : '',
-                                shibuya_commute:  '',
+                                commute_lines:    [],
+                                nearest_stations: [],
                                 url: href.startsWith('http') ? href : 'https://www.ur-net.go.jp' + href,
                             });
                         } catch(e) {}
@@ -140,23 +141,33 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                             if (!detailLink) return;
                             const card = room.closest('[class*="js-bukken-key"]');
                             if (!card) return;
-                            const href   = detailLink.getAttribute('href') || '';
+                            const href     = detailLink.getAttribute('href') || '';
                             const cardText = card.innerText || '';
-                            const text   = room.innerText || '';
+                            const text     = room.innerText || '';
 
-                            // Extract Shibuya commute from card text
-                            const shibuyaMatches = [...cardText.matchAll(/渋谷駅から[^）]+）/g)];
-                            const shibuyaCommute = shibuyaMatches.slice(0,2).map(m => m[0]).join('、');
+                            // Extract ANY station-to-station commute pattern
+                            const commuteMatches = [...cardText.matchAll(/[^\\s　、,\\n]+駅から[^\\s　、,\\n]+駅まで(\\d+)分（乗り換え(\\d+)回）/g)];
+                            const commuteLines = commuteMatches.slice(0, 3).map(m => m[0]);
 
-                            // Clean property name (first non-commute line)
+                            // Extract nearest station walking times
+                            const stationMatches = [...cardText.matchAll(/([^\\s　「」\\n]+線)[「｢]([^」｣]+)[」｣]駅\\s*徒歩([\\d～〜]+分)/g)];
+                            const nearestStations = stationMatches.slice(0, 3).map(m => `${m[2]}駅 徒歩${m[3]}`);
+
+                            // Clean property name — filter out commute lines and station walking lines
                             const nameLine = cardText.split('\\n')
                                 .map(s => s.trim())
-                                .filter(s => s && !s.includes('渋谷駅') && !s.includes('東京駅') && !s.includes('横浜駅'))[0] || '';
+                                .filter(s => s
+                                    && !s.match(/駅から.+駅まで/)
+                                    && !s.match(/駅\\s*徒歩/)
+                                    && !s.includes('お気に入り')
+                                    && !s.includes('住棟別')
+                                    && s.length > 1
+                                )[0] || '';
 
                             const rentMatch   = text.match(/([\\d,]+)\\s*円/);
                             const madoriMatch = text.match(/([1-9][LDKSR]+|ワンルーム)/);
                             const sqmMatch    = text.match(/([\\d.]+)\\s*㎡/);
-                            const roomMatch   = text.match(/([\\d]+号棟[^\\d]*[\\d]+号室|[\\d]+号室)/);
+                            const roomMatch   = text.match(/([\\d]+号棟[^\\d]*[\\d]+号室|[\\d-]+-[\\d]+号棟[^\\d]*[\\d]+号室|[\\d]+号室)/);
                             const rentYen     = rentMatch ? parseInt(rentMatch[1].replace(/,/g,'')) : 0;
                             const id          = href.replace(/\\.html$/, '').split('/').pop().replace(/\\s/g,'');
 
@@ -170,7 +181,8 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                                 madori:    madoriMatch ? madoriMatch[1] : '不明',
                                 sqm:       sqmMatch ? parseFloat(sqmMatch[1]) : 0,
                                 discount_period: '',
-                                shibuya_commute: shibuyaCommute,
+                                commute_lines:    commuteLines,
+                                nearest_stations: nearestStations,
                                 url: href.startsWith('http') ? href : 'https://www.ur-net.go.jp' + href,
                             });
                         } catch(e) {}
@@ -202,12 +214,10 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
 
 
 def get_property_details(url: str) -> dict:
-    """Scrape building age, renovation, station access from room detail page."""
+    """Scrape building age and renovation status from room detail page."""
     result = {
         "building_age": "不明",
         "renovation": False,
-        "nearest_stations": [],
-        "shinjuku_commute": "",
         "address": "",
         "maps_url": "",
         "sales_center": "",
@@ -228,40 +238,22 @@ def get_property_details(url: str) -> dict:
             data = page.evaluate("""() => {
                 const text = document.body.innerText || '';
 
-                // Building year — 築XXXX年 or XXXX年築
-                const ageMatch = text.match(/築(\\d{4})年|(\\d{4})年築/);
-                let buildingAge = '不明';
-                if (ageMatch) {
-                    const yr = parseInt(ageMatch[1] || ageMatch[2]);
-                    const age = 2026 - yr;
-                    buildingAge = `${yr}年築（築${age}年）`;
-                }
+                // Building age using confirmed selector
+                const ageEl = document.querySelector('.item_text.rep_years, [class*="rep_years"]');
+                const buildingAge = ageEl ? ageEl.textContent.trim() : '不明';
 
                 // Renovation
                 const renovation = text.includes('リノベーション');
-
-                // Nearest stations: XX駅 徒歩N分
-                const stMatches = [...text.matchAll(/([^\\n　\\s、,]+駅)[^\\d]*徒歩(\\d+)[^\\d]*分/g)];
-                const nearestStations = [...new Map(stMatches.map(m => [m[1], `${m[1]} 徒歩${m[2]}分`])).values()].slice(0, 3);
-
-                // Shinjuku commute
-                const shinjukuMatch = text.match(/新宿[^\\n]*?(\\d+)分[^\\n]*(乗り換え(\\d+)回)?/);
-                let shinjukuCommute = '';
-                if (shinjukuMatch) {
-                    const transfers = shinjukuMatch[3] ? `乗り換え${shinjukuMatch[3]}回` : '乗り換えなし';
-                    shinjukuCommute = `${shinjukuMatch[1]}分（${transfers}）`;
-                }
 
                 // Address
                 const addrMatch = text.match(/(東京都|神奈川県)[^\\n]{5,40}/);
                 const address = addrMatch ? addrMatch[0].trim() : '';
 
                 // Sales center
-                const centerMatch = text.match(/(営業センター|管理センター|センター)[^\\n]*/);
+                const centerMatch = text.match(/(営業センター|管理センター|センター名)[^\\n]*/);
                 const salesCenter = centerMatch ? centerMatch[0].trim().substring(0, 60) : '';
 
-                return { building_age: buildingAge, renovation, nearest_stations: nearestStations,
-                         shinjuku_commute: shinjukuCommute, address, sales_center: salesCenter };
+                return { building_age: buildingAge, renovation, address, sales_center: salesCenter };
             }""")
 
             result.update(data)
@@ -299,7 +291,12 @@ def notify_line(new_props: list[dict]) -> None:
             f"¥{p['rent_yen']:,}/mo (normally ¥{p['normal_rent_yen']:,} — {p.get('discount_period','')} discount)"
             if is_discount else f"¥{p['rent_yen']:,}/mo"
         )
-        msg += f"\n■ [{p['label']}] {p['name']}\n  {p['madori']} {p['sqm']}㎡ / {rent_str}\n  {p['url']}\n"
+        # Add first commute line to LINE if available
+        commute = p.get("commute_lines", [])
+        commute_str = f"\n  🚃 {commute[0]}" if commute else ""
+        nearest = p.get("nearest_stations", [])
+        nearest_str = f"\n  🚶 {nearest[0]}" if nearest else ""
+        msg += f"\n■ [{p['label']}] {p['name']}\n  {p['madori']} {p['sqm']}㎡ / {rent_str}{commute_str}{nearest_str}\n  {p['url']}\n"
     if len(new_props) > 5:
         msg += f"\n...and {len(new_props)-5} more (see email)"
 
@@ -329,60 +326,59 @@ def notify_email(new_props: list[dict]) -> None:
             if is_discount else f"¥{p['rent_yen']:,}"
         )
         label_color = "#c0392b" if "Special" in p["label"] else "#2980b9"
-        reno_badge = "<span style='background:#27ae60;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px;margin-left:4px'>🔧 リノベ済</span>" if details["renovation"] else ""
+        reno_badge = (
+            "<span style='background:#27ae60;color:#fff;border-radius:3px;"
+            "padding:1px 5px;font-size:11px;margin-left:4px'>🔧 リノベ済</span>"
+            if details["renovation"] else ""
+        )
 
-        # Shibuya commute — from existing data for regular, from detail page for tokubetsu
-        shibuya = p.get("shibuya_commute", "") or ""
-        shinjuku = details.get("shinjuku_commute", "")
-
+        # Commute rows from card text
         commute_rows = ""
-        if shibuya:
-            for line in shibuya.split("、"):
-                line = line.strip()
-                if line:
-                    commute_rows += f"<tr><td style='padding:3px 8px;color:#555'>🚃 渋谷</td><td style='padding:3px 8px'>{line}</td></tr>"
-        if shinjuku:
-            commute_rows += f"<tr><td style='padding:3px 8px;color:#555'>🚃 新宿</td><td style='padding:3px 8px'>{shinjuku}</td></tr>"
-        for st in details.get("nearest_stations", []):
+        for line in p.get("commute_lines", []):
+            commute_rows += f"<tr><td style='padding:3px 8px;color:#555;white-space:nowrap'>🚃</td><td style='padding:3px 8px'>{line}</td></tr>"
+        for st in p.get("nearest_stations", []):
             commute_rows += f"<tr><td style='padding:3px 8px;color:#555'>🚶</td><td style='padding:3px 8px'>{st}</td></tr>"
 
-        maps_link = f"<a href='{details['maps_url']}' style='color:#2980b9'>📍 Google Maps</a>" if details.get("maps_url") else ""
-        sales_center = f"<div style='margin-top:4px;color:#666;font-size:12px'>🏢 {details['sales_center']}</div>" if details.get("sales_center") else ""
+        maps_link = (
+            f"<a href='{details['maps_url']}' style='color:#2980b9'>📍 Google Maps</a>"
+            if details.get("maps_url") else ""
+        )
+        sales_center = (
+            f"<div style='margin-top:4px;color:#666;font-size:12px'>🏢 {details['sales_center']}</div>"
+            if details.get("sales_center") else ""
+        )
 
         rows += f"""
-        <tr>
-          <td colspan="5" style="padding:0"><table width="100%" style="border-collapse:collapse;border:2px solid #ddd;border-radius:6px;margin-bottom:12px">
-            <tr style="background:#f0f4f8">
-              <td colspan="2" style="padding:10px">
-                <span style="background:{label_color};color:#fff;border-radius:3px;padding:2px 6px;font-size:11px">{p['label']}</span>
-                {reno_badge}
-                <strong style="margin-left:8px;font-size:15px">{p['name']}</strong>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:8px 10px;width:50%;vertical-align:top">
-                <table style="border-collapse:collapse">
-                  <tr><td style="padding:3px 8px;color:#555">間取り</td><td style="padding:3px 8px"><strong>{p['madori']}</strong></td></tr>
-                  <tr><td style="padding:3px 8px;color:#555">面積</td><td style="padding:3px 8px">{p['sqm']}㎡</td></tr>
-                  <tr><td style="padding:3px 8px;color:#555">家賃/月</td><td style="padding:3px 8px"><strong>{rent_cell}</strong></td></tr>
-                  <tr><td style="padding:3px 8px;color:#555">築年</td><td style="padding:3px 8px">{details['building_age']}</td></tr>
-                </table>
-              </td>
-              <td style="padding:8px 10px;vertical-align:top">
-                <table style="border-collapse:collapse">
-                  {commute_rows}
-                </table>
-              </td>
-            </tr>
-            <tr>
-              <td colspan="2" style="padding:6px 10px;border-top:1px solid #eee">
-                <a href="{p['url']}" style="color:#2980b9;font-weight:bold">🔗 物件詳細を見る</a>
-                &nbsp;&nbsp;{maps_link}
-                {sales_center}
-              </td>
-            </tr>
-          </table></td>
-        </tr>"""
+        <tr><td colspan="5" style="padding:0">
+        <table width="100%" style="border-collapse:collapse;border:2px solid #ddd;border-radius:6px;margin-bottom:14px">
+          <tr style="background:#f0f4f8">
+            <td colspan="2" style="padding:10px">
+              <span style="background:{label_color};color:#fff;border-radius:3px;padding:2px 6px;font-size:11px">{p['label']}</span>
+              {reno_badge}
+              <strong style="margin-left:8px;font-size:15px">{p['name']}</strong>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 10px;width:45%;vertical-align:top">
+              <table style="border-collapse:collapse">
+                <tr><td style="padding:3px 8px;color:#555">間取り</td><td style="padding:3px 8px"><strong>{p['madori']}</strong></td></tr>
+                <tr><td style="padding:3px 8px;color:#555">面積</td><td style="padding:3px 8px">{p['sqm']}㎡</td></tr>
+                <tr><td style="padding:3px 8px;color:#555">家賃/月</td><td style="padding:3px 8px"><strong>{rent_cell}</strong></td></tr>
+                <tr><td style="padding:3px 8px;color:#555">築年</td><td style="padding:3px 8px">{details['building_age']}</td></tr>
+              </table>
+            </td>
+            <td style="padding:8px 10px;vertical-align:top">
+              <table style="border-collapse:collapse">{commute_rows}</table>
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="padding:6px 10px;border-top:1px solid #eee">
+              <a href="{p['url']}" style="color:#2980b9;font-weight:bold">🔗 物件詳細を見る</a>
+              &nbsp;&nbsp;{maps_link}
+              {sales_center}
+            </td>
+          </tr>
+        </table></td></tr>"""
 
     html = f"""<html><body style="font-family:sans-serif;max-width:700px;margin:0 auto;padding:20px">
     <h2 style="color:#2c3e50">🏠 {len(new_props)} New UR Listing(s)</h2>
