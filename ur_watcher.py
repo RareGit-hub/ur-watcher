@@ -100,15 +100,21 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                             const bukken    = row.closest('.js-tokubetsu-bukken');
                             const tdfkBlock = row.closest('[class*="js-tokubetsu-tdfk"]');
                             const prefEl    = tdfkBlock && tdfkBlock.querySelector('.js-tokubetsu-tdfk-name');
-                            const nameEl    = bukken && bukken.querySelector('h3, h4, [class*="name"], [class*="title"]');
                             const pref      = prefEl ? prefEl.textContent.trim() : '';
-                            const name      = nameEl ? nameEl.textContent.trim() : '';
+
+                            // Use link text for property name (avoids picking up city headings)
+                            const nameLink  = bukken && bukken.querySelector('a[href*="/chintai/"]');
+                            const nameEl    = bukken && bukken.querySelector('h3, h4, [class*="name"], [class*="title"]');
+                            const name      = nameLink ? nameLink.textContent.trim() :
+                                             nameEl   ? nameEl.textContent.trim()   : '';
+
                             const text      = row.innerText || '';
                             const allRents  = [...text.matchAll(/([\\d,]+)\\s*円/g)]
                                 .map(m => parseInt(m[1].replace(/,/g,'')))
                                 .filter(v => v > 10000);
                             const normalYen   = allRents[0] || 0;
                             const discountYen = allRents[1] || normalYen;
+
                             const mado   = text.match(/([1-9][LDKSR]+|ワンルーム)/);
                             const sqm    = text.match(/([\\d.]+)\\s*㎡/);
                             const floor  = text.match(/([\\d]+)階/);
@@ -116,6 +122,11 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                             const link   = row.querySelector('a') || (bukken && bukken.querySelector('a'));
                             const href   = link ? (link.getAttribute('href') || '') : '';
                             const id     = ('tokubetsu_' + name + '_' + (mado ? mado[1] : '') + '_' + (floor ? floor[1] : '')).replace(/\\s/g,'');
+
+                            // Nearest stations from row text
+                            const stMatches = [...text.matchAll(/[「｢]([^」｣]+)[」｣]駅[^\\n]*?徒歩([\\d～〜]+分)/g)];
+                            const nearestStations = stMatches.slice(0, 3).map(m => m[1] + '駅 徒歩' + m[2]);
+
                             results.push({
                                 id, name, pref,
                                 normal_rent_yen:  normalYen,
@@ -125,7 +136,7 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                                 sqm:              sqm    ? parseFloat(sqm[1]) : 0,
                                 discount_period:  period ? period[1]          : '',
                                 commute_lines:    [],
-                                nearest_stations: [],
+                                nearest_stations: nearestStations,
                                 url: href.startsWith('http') ? href : 'https://www.ur-net.go.jp' + href,
                             });
                         } catch(e) {}
@@ -151,9 +162,9 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
 
                             // Extract nearest station walking times
                             const stationMatches = [...cardText.matchAll(/([^\\s　「」\\n]+線)[「｢]([^」｣]+)[」｣]駅\\s*徒歩([\\d～〜]+分)/g)];
-                            const nearestStations = stationMatches.slice(0, 3).map(m => `${m[2]}駅 徒歩${m[3]}`);
+                            const nearestStations = stationMatches.slice(0, 3).map(m => m[2] + '駅 徒歩' + m[3]);
 
-                            // Clean property name — filter out commute lines and station walking lines
+                            // Clean property name — filter out commute and station lines
                             const nameLine = cardText.split('\\n')
                                 .map(s => s.trim())
                                 .filter(s => s
@@ -250,7 +261,7 @@ def get_property_details(url: str) -> dict:
                 const address = addrMatch ? addrMatch[0].trim() : '';
 
                 // Sales center
-                const centerMatch = text.match(/(営業センター|管理センター|センター名)[^\\n]*/);
+                const centerMatch = text.match(/(営業センター|管理センター)[^\\n]*/);
                 const salesCenter = centerMatch ? centerMatch[0].trim().substring(0, 60) : '';
 
                 return { building_age: buildingAge, renovation, address, sales_center: salesCenter };
@@ -291,7 +302,6 @@ def notify_line(new_props: list[dict]) -> None:
             f"¥{p['rent_yen']:,}/mo (normally ¥{p['normal_rent_yen']:,} — {p.get('discount_period','')} discount)"
             if is_discount else f"¥{p['rent_yen']:,}/mo"
         )
-        # Add first commute line to LINE if available
         commute = p.get("commute_lines", [])
         commute_str = f"\n  🚃 {commute[0]}" if commute else ""
         nearest = p.get("nearest_stations", [])
@@ -332,7 +342,6 @@ def notify_email(new_props: list[dict]) -> None:
             if details["renovation"] else ""
         )
 
-        # Commute rows from card text
         commute_rows = ""
         for line in p.get("commute_lines", []):
             commute_rows += f"<tr><td style='padding:3px 8px;color:#555;white-space:nowrap'>🚃</td><td style='padding:3px 8px'>{line}</td></tr>"
