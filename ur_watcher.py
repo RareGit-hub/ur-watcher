@@ -55,7 +55,7 @@ SEARCH_SOURCES = [
 ]
 
 MAX_RENT_MAN_YEN = 15.0
-ALLOWED_MADORI   = ["1R・1K", "1DK", "2K", "1LDK", "2LDK", "2DK"]
+ALLOWED_MADORI   = ["1R・1K", "1DK", "2K", "1LDK", "2DK"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 
