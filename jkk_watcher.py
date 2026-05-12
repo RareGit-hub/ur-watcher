@@ -23,7 +23,7 @@ WHITELIST_FILE = Path("jkk_whitelist.json")
 SEEN_FILE      = Path("jkk_seen.json")
 
 MAX_RENT_YEN   = 160000
-ALLOWED_MADORI = ["1R", "1K", "1DK", "1LDK", "2K", "2DK"]
+ALLOWED_MADORI = []  # no madori filter for JKK
 
 GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS", "").strip()
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
