@@ -76,7 +76,6 @@ def save_seen(seen: set):
 def scrape_available() -> list[dict]:
     props = []
     with sync_playwright() as pw:
-        # Disable automation detection so server treats us like a real browser
         browser = pw.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"]
@@ -92,7 +91,6 @@ def scrape_available() -> list[dict]:
             extra_http_headers={"Accept-Language": "ja,en-US;q=0.9,en;q=0.8"},
         )
         page = ctx.new_page()
-        # Hide navigator.webdriver flag
         page.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
@@ -100,78 +98,51 @@ def scrape_available() -> list[dict]:
             # Step 1: load splash page
             print("  Loading splash page...")
             page.goto(START_URL, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(5_000)
+            page.wait_for_timeout(4_000)
             print(f"  At: {page.url}")
 
-            # Check if we got the splash (has こちら) or something else
-            has_kochira = page.evaluate(
-                "() => [...document.querySelectorAll('a')].some(a => a.innerText.includes('こちら'))"
-            )
-            print(f"  Has こちら: {has_kochira}")
+            # Step 2: POST forwardForm data directly in current page
+            # (bypasses window.open — server just needs redirect=true + url param)
+            print("  POSTing forwardForm to get search form...")
+            with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
+                page.evaluate("""() => {
+                    const form = document.createElement('form');
+                    form.method = 'post';
+                    form.action = 'https://jhomes.to-kousya.or.jp/search/jkknet/service/akiyaJyoukenStartInit';
+                    [['redirect','true'],
+                     ['url','https://jhomes.to-kousya.or.jp/search/jkknet/service/akiyaJyoukenStartInit']]
+                    .forEach(([n,v]) => {
+                        const i = document.createElement('input');
+                        i.type='hidden'; i.name=n; i.value=v;
+                        form.appendChild(i);
+                    });
+                    document.body.appendChild(form);
+                    form.submit();
+                }""")
+            search_page = page
+            search_page.wait_for_timeout(3_000)
+            print(f"  Search form at: {search_page.url}")
+            has_btn = search_page.evaluate('() => !!document.querySelector(\'img[alt*="検索"]\')')
+            print(f"  Has 検索 button: {has_btn}")
 
-            if not has_kochira:
-                # May have auto-redirected — wait a bit more
-                page.wait_for_timeout(5_000)
-                has_kochira = page.evaluate(
-                    "() => [...document.querySelectorAll('a')].some(a => a.innerText.includes('こちら'))"
-                )
-                print(f"  Has こちら after wait: {has_kochira}")
-
-            if has_kochira:
-                # Step 2: click こちら — opens search form in NEW TAB
-                print("  Clicking こちら (new tab)...")
-                with ctx.expect_page() as new_page_info:
-                    page.click('a:has-text("こちら")', timeout=10_000)
-                search_page = new_page_info.value
-                search_page.add_init_script(
-                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-                )
-                search_page.wait_for_load_state("domcontentloaded")
-                search_page.wait_for_timeout(5_000)
-                print(f"  New tab at: {search_page.url}")
-            else:
-                # Already past splash — use current page
-                print("  No splash found, using current page as search form")
-                search_page = page
-
-            # Step 3: click 検索する button on the search form
+            # Step 3: click 検索する → navigates to akiyaJyoukenRef
             print("  Clicking 検索する...")
-            try:
-                with search_page.expect_navigation(
-                    wait_until="domcontentloaded", timeout=30_000
-                ):
-                    clicked = search_page.evaluate("""() => {
-                        // Try various selectors for the search button
-                        const selectors = [
-                            'input[value*="検索"]',
-                            'input[type="image"]',
-                            'input[type="submit"]',
-                            'button',
-                            'img[alt*="検索"]',
-                            '[onclick*="search"], [onclick*="kensaku"], [onclick*="submit"]',
-                        ];
-                        for (const sel of selectors) {
-                            const el = document.querySelector(sel);
-                            if (el) { el.click(); return sel + ': ' + (el.value || el.alt || el.src || ''); }
-                        }
-                        // Last resort: submit the form
-                        const form = document.querySelector('form');
-                        if (form) { form.requestSubmit(); return 'form.requestSubmit()'; }
-                        return null;
-                    }""")
-                    print(f"  Clicked: {clicked}")
-            except PWTimeout:
-                print(f"  Search button navigation timed out, current: {search_page.url}")
-
+            with search_page.expect_navigation(
+                wait_until="domcontentloaded", timeout=30_000
+            ):
+                search_page.evaluate("""() => {
+                    const btn = document.querySelector('a[onclick*="submitPage"]')
+                               || document.querySelector('img[alt*="検索"]');
+                    if (btn) btn.click();
+                }""")
             search_page.wait_for_timeout(3_000)
             print(f"  Results at: {search_page.url}")
 
-            # Bail out if we're not at the results page
             if "akiyaJyoukenRef" not in search_page.url:
                 print("  Not on results page, aborting")
                 return props
 
-            # Step 4: try 50件 per page
+            # Step 4: set 50件 per page
             clicked_50 = search_page.evaluate("""() => {
                 for (const el of document.querySelectorAll('a, input, button, td, span')) {
                     if ((el.innerText || el.value || '').trim() === '50件') {
@@ -212,7 +183,7 @@ def scrape_available() -> list[dict]:
                         const cells = [...allRows[i].querySelectorAll('td')];
                         if (cells.length < 8) continue;
                         const t = (idx) =>
-                            (cells[idx]?.innerText || '').trim().replace(/\s+/g, ' ');
+                            (cells[idx]?.innerText || '').trim().replace(/[\\s]+/g, ' ');
 
                         const name   = t(1);
                         const area   = t(2);
@@ -260,6 +231,7 @@ def scrape_available() -> list[dict]:
             browser.close()
 
     return props
+
 
 # ─── Whitelist matching ───────────────────────────────────────────────────────
 
