@@ -86,10 +86,17 @@ def scrape_available() -> list[dict]:
             page.goto(START_URL, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_timeout(6_000)
 
-            # Step 2: submit form and wait properly for navigation to results page
-            with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
-                page.evaluate("() => document.querySelector('form').submit()")
-            page.wait_for_timeout(5_000)
+            # Step 2: POST the form to establish the search session server-side
+            page.evaluate("() => document.querySelector('form').submit()")
+            page.wait_for_timeout(8_000)
+            print(f"  After submit URL: {page.url}")
+
+            # Step 3: navigate directly to results page
+            # The POST has set the session; a GET to akiyaJyoukenRef now shows results
+            if "akiyaJyoukenRef" not in page.url:
+                print(f"  Navigating to results page...")
+                page.goto(RESULTS_URL, wait_until="domcontentloaded", timeout=60_000)
+                page.wait_for_timeout(5_000)
             print(f"  Results loaded: {page.url}")
 
             # Step 3: set 50件 per page to avoid pagination if possible
