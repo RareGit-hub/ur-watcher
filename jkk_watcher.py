@@ -395,7 +395,7 @@ def main():
         if not wl:
             continue
 
-        if not is_allowed_madori(prop["madori"]):
+        if ALLOWED_MADORI and not is_allowed_madori(prop["madori"]):
             continue
         if parse_rent(prop["rent"]) > MAX_RENT_YEN:
             continue
