@@ -81,25 +81,59 @@ def scrape_available() -> list[dict]:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         ).new_page()
         try:
-            # Step 1: load start page (establishes session + CSRF tokens)
-            print(f"  Loading search page...")
-            page.goto(START_URL, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(6_000)
+            # Step 1: navigate to results URL — server redirects to splash page
+            print(f"  Loading splash page...")
+            page.goto(RESULTS_URL, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_timeout(4_000)
+            print(f"  At: {page.url}")
 
-            # Step 2: POST the form to establish the search session server-side
-            page.evaluate("() => document.querySelector('form').submit()")
-            page.wait_for_timeout(8_000)
-            print(f"  After submit URL: {page.url}")
+            # Step 2: click こちら to reach the search form
+            page.click('a:has-text("こちら")', timeout=10_000)
+            page.wait_for_load_state("domcontentloaded")
+            page.wait_for_timeout(5_000)
+            print(f"  At: {page.url}")
 
-            # Step 3: navigate directly to results page
-            # The POST has set the session; a GET to akiyaJyoukenRef now shows results
-            if "akiyaJyoukenRef" not in page.url:
-                print(f"  Navigating to results page...")
-                page.goto(RESULTS_URL, wait_until="domcontentloaded", timeout=60_000)
-                page.wait_for_timeout(5_000)
-            print(f"  Results loaded: {page.url}")
+            # Debug: find any onclick elements (to locate 検索する)
+            onclick_els = page.evaluate("""() => {
+                return [...document.querySelectorAll('[onclick], img')].map(el => ({
+                    tag: el.tagName,
+                    onclick: el.getAttribute('onclick') || '',
+                    alt: el.alt || '',
+                    src: (el.src || '').split('/').pop(),
+                })).filter(el => el.onclick || el.alt);
+            }""")
+            print(f"  onclick/img elements: {onclick_els[:8]}")
 
-            # Step 3: set 50件 per page to avoid pagination if possible
+            # Step 3: submit form using requestSubmit() which fires onsubmit handlers
+            # Use expect_navigation to wait for redirect to akiyaJyoukenRef
+            print(f"  Submitting form...")
+            try:
+                with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
+                    page.evaluate("() => document.querySelector('form').requestSubmit()")
+            except PWTimeout:
+                # requestSubmit failed — try clicking any image/element with onclick
+                print(f"  requestSubmit timed out, trying onclick elements...")
+                clicked = page.evaluate("""() => {
+                    const els = [...document.querySelectorAll('img[onclick], [onclick]')];
+                    for (const el of els) {
+                        const oc = el.getAttribute('onclick') || '';
+                        if (oc.includes('submit') || oc.includes('kensakuSearch') ||
+                            oc.includes('search') || oc.includes('kensaku')) {
+                            el.click(); return el.alt || el.getAttribute('onclick');
+                        }
+                    }
+                    // Last resort: click first image
+                    const img = document.querySelector('input[type="image"], img[src*="search"], img[src*="kensaku"]');
+                    if (img) { img.click(); return 'image: ' + img.src; }
+                    return null;
+                }""")
+                print(f"  Clicked: {clicked}")
+                page.wait_for_timeout(8_000)
+
+            page.wait_for_timeout(3_000)
+            print(f"  Results at: {page.url}")
+
+            # Step 4: try 50件 per page
             clicked_50 = page.evaluate("""() => {
                 for (const el of document.querySelectorAll('a, input, button, td, span')) {
                     if ((el.innerText || el.value || '').trim() === '50件') {
@@ -112,7 +146,7 @@ def scrape_available() -> list[dict]:
                 page.wait_for_timeout(4_000)
                 print("  Set to 50 per page")
 
-            # Step 4: extract table across pages
+            # Step 5: extract table across pages
             page_num = 1
             while True:
                 print(f"  Page {page_num}...", end=" ")
@@ -140,10 +174,8 @@ def scrape_available() -> list[dict]:
                         const cells = [...allRows[i].querySelectorAll('td')];
                         if (cells.length < 8) continue;
                         const t = (idx) =>
-                            (cells[idx]?.innerText || '').trim().replace(/\\s+/g, ' ');
+                            (cells[idx]?.innerText || '').trim().replace(/\s+/g, ' ');
 
-                        // columns: image(0) name(1) area(2) priority(3) type(4)
-                        //          madori(5) sqm(6) rent(7) fee(8) units(9) button(10)
                         const name   = t(1);
                         const area   = t(2);
                         const madori = t(5);
@@ -163,9 +195,8 @@ def scrape_available() -> list[dict]:
                 print(f"{len(rows)} rows (total {len(props)})")
 
                 if clicked_50:
-                    break  # all on one page
+                    break
 
-                # try next page button
                 next_num = page_num + 1
                 more = page.evaluate(f"""() => {{
                     for (const el of document.querySelectorAll(
@@ -185,6 +216,8 @@ def scrape_available() -> list[dict]:
 
         except PWTimeout:
             print("  Timeout on JKK site")
+        except Exception as e:
+            print(f"  Error: {e}")
         finally:
             browser.close()
 
