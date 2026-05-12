@@ -84,21 +84,18 @@ def scrape_available() -> list[dict]:
             # Step 1: load start page (establishes session + CSRF tokens)
             print(f"  Loading search page...")
             page.goto(START_URL, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(5_000)
+            page.wait_for_timeout(6_000)
 
-            # Step 2: click 検索する with no filters → all available listings
-            clicked = page.evaluate("""() => {
-                const candidates = [
-                    ...document.querySelectorAll('input[type="submit"], input[type="button"], button')
-                ];
-                for (const el of candidates) {
-                    const label = (el.value || el.innerText || '').trim();
-                    if (label.includes('検索')) { el.click(); return true; }
-                }
+            # Step 2: submit the form directly (no submit button needed)
+            # Defaults = no filters = all results
+            submitted = page.evaluate("""() => {
+                const form = document.querySelector('form');
+                if (form) { form.submit(); return true; }
                 return false;
             }""")
-            if not clicked:
-                print("  Could not find 検索する button"); return props
+            if not submitted:
+                print("  Could not find search form"); return props
+            print("  Form submitted")
 
             page.wait_for_load_state("domcontentloaded")
             page.wait_for_timeout(5_000)
