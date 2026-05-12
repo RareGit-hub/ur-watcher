@@ -1,4 +1,4 @@
-name: UR Property Watcher
+name: UR + JKK Property Watcher
 
 on:
   workflow_dispatch:
@@ -35,7 +35,7 @@ jobs:
           pip install -r requirements.txt
           playwright install chromium --with-deps
 
-      - name: Run watcher
+      - name: Run UR watcher
         env:
           GMAIL_ADDRESS:      ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
@@ -44,6 +44,15 @@ jobs:
           LINE_USER_ID:       ${{ secrets.LINE_USER_ID }}
           DEBUG_MODE:         ${{ github.event.inputs.debug_mode || 'false' }}
         run: python ur_watcher.py
+
+      - name: Run JKK watcher
+        env:
+          GMAIL_ADDRESS:      ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_EMAIL:       ${{ secrets.NOTIFY_EMAIL }}
+          LINE_CHANNEL_TOKEN: ${{ secrets.LINE_CHANNEL_TOKEN }}
+          LINE_USER_ID:       ${{ secrets.LINE_USER_ID }}
+        run: python jkk_watcher.py
 
       - name: Upload debug files
         if: ${{ github.event.inputs.debug_mode == 'true' }}
@@ -60,5 +69,5 @@ jobs:
         run: |
           git config user.name  "ur-watcher-bot"
           git config user.email "actions@github.com"
-          git add seen_ids.json
+          git add seen_ids.json jkk_seen.json
           git diff --staged --quiet || (git commit -m "chore: update seen_ids [skip ci]" && git pull --rebase && git push)
