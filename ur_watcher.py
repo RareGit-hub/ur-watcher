@@ -103,10 +103,10 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                             const pref      = prefEl ? prefEl.textContent.trim() : '';
 
                             // Use link text for property name (avoids picking up city headings)
-                            const nameLink = row.querySelector('a[href*="/chintai/"]') || row.querySelector('a');
-                            const name     = nameLink
-                            ? nameLink.textContent.trim().replace(/[\s\u3000]+/g, ' ').trim()
-                            : '';
+                            const nameLink  = bukken && bukken.querySelector('a[href*="/chintai/"]');
+                            const nameEl    = bukken && bukken.querySelector('h3, h4, [class*="name"], [class*="title"]');
+                            const name      = nameLink ? nameLink.textContent.trim() :
+                                             nameEl   ? nameEl.textContent.trim()   : '';
 
                             const text      = row.innerText || '';
                             const allRents  = [...text.matchAll(/([\\d,]+)\\s*円/g)]
@@ -119,7 +119,8 @@ def scrape_listings(url: str, label: str = "", source_type: str = "regular") -> 
                             const sqm    = text.match(/([\\d.]+)\\s*㎡/);
                             const floor  = text.match(/([\\d]+)階/);
                             const period = text.match(/(\\d+年)/);
-                            const href   = nameLink ? (nameLink.getAttribute('href') || '') : '';
+                            const link   = row.querySelector('a') || (bukken && bukken.querySelector('a'));
+                            const href   = link ? (link.getAttribute('href') || '') : '';
                             const id     = ('tokubetsu_' + name + '_' + (mado ? mado[1] : '') + '_' + (floor ? floor[1] : '')).replace(/\\s/g,'');
 
                             // Nearest stations from row text
@@ -279,6 +280,36 @@ def get_property_details(url: str) -> dict:
     return result
 
 
+def get_ur_stars(p: dict, details: dict) -> str:
+    """Rate a UR listing: ⭐⭐⭐ / ⭐⭐ / ⭐"""
+    # Parse commute time from first commute line (e.g. "東京駅から高島平駅まで40分")
+    commute_mins = 999
+    for line in p.get("commute_lines", []):
+        m = re.search(r'まで(\d+)分', line)
+        if m:
+            commute_mins = min(commute_mins, int(m.group(1)))
+
+    # Parse walk time from nearest station (e.g. "高島平駅 徒歩2～11分")
+    walk_mins = 999
+    for st in p.get("nearest_stations", []):
+        m = re.search(r'徒歩(\d+)', st)
+        if m:
+            walk_mins = min(walk_mins, int(m.group(1)))
+
+    # Parse build year from detail page (e.g. "1989年（築37年）")
+    year_match = re.search(r'(\d{4})年', details.get("building_age", ""))
+    built_year = int(year_match.group(1)) if year_match else 0
+
+    renovated = details.get("renovation", False)
+
+    if commute_mins <= 30 and walk_mins <= 15 and (built_year >= 2010 or renovated):
+        return "⭐⭐⭐"
+    elif commute_mins <= 35 and walk_mins <= 15:
+        return "⭐⭐"
+    else:
+        return "⭐"
+
+
 def matches(p: dict, prefecture_filter: list | None = None) -> bool:
     if MAX_RENT_MAN_YEN and p["rent_man"] > MAX_RENT_MAN_YEN:
         return False
@@ -305,7 +336,17 @@ def notify_line(new_props: list[dict]) -> None:
         commute_str = f"\n  🚃 {commute[0]}" if commute else ""
         nearest = p.get("nearest_stations", [])
         nearest_str = f"\n  🚶 {nearest[0]}" if nearest else ""
-        msg += f"\n■ [{p['label']}] {p['name']}\n  {p['madori']} {p['sqm']}㎡ / {rent_str}{commute_str}{nearest_str}\n  {p['url']}\n"
+        # Quick star for LINE (no building age available yet)
+        c_mins = 999
+        for line in commute:
+            m = re.search(r'まで(\d+)分', line)
+            if m: c_mins = min(c_mins, int(m.group(1)))
+        w_mins = 999
+        for st in nearest:
+            m = re.search(r'徒歩(\d+)', st)
+            if m: w_mins = min(w_mins, int(m.group(1)))
+        quick_stars = "⭐⭐" if c_mins <= 35 and w_mins <= 15 else "⭐"
+        msg += f"\n■ {quick_stars} [{p['label']}] {p['name']}\n  {p['madori']} {p['sqm']}㎡ / {rent_str}{commute_str}{nearest_str}\n  {p['url']}\n"
     if len(new_props) > 5:
         msg += f"\n...and {len(new_props)-5} more (see email)"
 
@@ -326,6 +367,7 @@ def notify_email(new_props: list[dict]) -> None:
     for p in new_props:
         print(f"  Fetching details for {p['name']}...")
         details = get_property_details(p["url"])
+        stars = get_ur_stars(p, details)
 
         is_discount = p.get("normal_rent_yen", 0) and p["normal_rent_yen"] != p["rent_yen"]
         rent_cell = (
@@ -364,6 +406,7 @@ def notify_email(new_props: list[dict]) -> None:
               <span style="background:{label_color};color:#fff;border-radius:3px;padding:2px 6px;font-size:11px">{p['label']}</span>
               {reno_badge}
               <strong style="margin-left:8px;font-size:15px">{p['name']}</strong>
+              <span style="margin-left:6px;font-size:16px">{stars}</span>
             </td>
           </tr>
           <tr>
