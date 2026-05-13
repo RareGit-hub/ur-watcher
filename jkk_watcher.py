@@ -54,6 +54,30 @@ def is_allowed_madori(madori_raw: str) -> bool:
 def make_id(prop: dict) -> str:
     return f"jkk_{prop['name']}_{prop['madori']}_{prop['rent']}".replace(' ', '')
 
+def get_stars(wl: dict) -> str:
+    """Rate a whitelisted property: ⭐⭐⭐ / ⭐⭐ / ⭐"""
+    # Parse walk time (e.g. "3分" or "13～15分" → take first number)
+    walk_nums = re.findall(r'\d+', wl.get('walk_1', '999'))
+    walk = int(walk_nums[0]) if walk_nums else 999
+
+    # Parse commute (stored as string integers in whitelist)
+    try: shibuya = int(wl.get('shibuya', 999))
+    except: shibuya = 999
+    try: shinjuku = int(wl.get('shinjuku', 999))
+    except: shinjuku = 999
+    best_commute = min(shibuya, shinjuku)
+
+    # Parse build year (e.g. "2014年1月" → 2014)
+    year_match = re.search(r'(\d{4})年', wl.get('built', ''))
+    built_year = int(year_match.group(1)) if year_match else 0
+
+    if walk <= 15 and best_commute <= 30 and built_year >= 2010:
+        return '⭐⭐⭐'
+    elif walk <= 15 and best_commute <= 30:
+        return '⭐⭐'
+    else:
+        return '⭐'
+
 # ─── State ────────────────────────────────────────────────────────────────────
 
 def load_whitelist() -> dict:
@@ -253,11 +277,12 @@ def notify_line(matches: list[dict]) -> None:
     msg = f"🏠 JKK: {len(matches)} whitelist listing(s) available!\n"
     for m in matches[:5]:
         p, wl = m["prop"], m["whitelist"]
+        stars = get_stars(wl)
         rent_total = parse_rent(p["rent"]) + parse_rent(p["fee"])
         st = wl.get("station_1", "")
         wk = wl.get("walk_1", "")
         msg += (
-            f"\n■ {p['name']} ({p['area']})\n"
+            f"\n■ {stars} {p['name']} ({p['area']})\n"
             f"  {normalize(p['madori'])} {p['sqm']}㎡ / ¥{rent_total:,}/月\n"
             f"  🚶 {st} {wk}\n"
             f"  📋 {START_URL}\n"
@@ -284,6 +309,7 @@ def notify_email(matches: list[dict]) -> None:
     rows = ""
     for m in matches:
         p, wl = m["prop"], m["whitelist"]
+        stars = get_stars(wl)
         rent_yen = parse_rent(p["rent"])
         fee_yen  = parse_rent(p["fee"])
         madori   = normalize(p["madori"])
@@ -307,6 +333,7 @@ def notify_email(matches: list[dict]) -> None:
               <span style="background:#e67e22;color:#fff;border-radius:3px;
                            padding:2px 6px;font-size:11px">JKK</span>
               <strong style="margin-left:8px;font-size:15px">{p['name']}</strong>
+              <span style="margin-left:6px;font-size:16px">{stars}</span>
               <span style="margin-left:8px;color:#666;font-size:12px">{p['area']}</span>
             </td>
           </tr>
