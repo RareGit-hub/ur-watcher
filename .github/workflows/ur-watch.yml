@@ -25,15 +25,21 @@ jobs:
           cache: pip
 
       - name: Cache Playwright browsers
+        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-1.50.0
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          playwright install chromium --with-deps
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browser
+        run: playwright install chromium
+
+      - name: Install Playwright system deps (cache miss only)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: playwright install-deps chromium
 
       - name: Run UR watcher
         env:
