@@ -260,7 +260,7 @@ def notify_line(matches: list[dict]) -> None:
             f"\n■ {p['name']} ({p['area']})\n"
             f"  {normalize(p['madori'])} {p['sqm']}㎡ / ¥{rent_total:,}/月\n"
             f"  🚶 {st} {wk}\n"
-            f"  📋 {RESULTS_URL}\n"
+            f"  📋 {START_URL}\n"
         )
     if len(matches) > 5:
         msg += f"\n...and {len(matches)-5} more — see email"
@@ -332,7 +332,7 @@ def notify_email(matches: list[dict]) -> None:
           </tr>
           <tr>
             <td colspan="2" style="padding:8px 10px;border-top:1px solid #eee">
-              <a href="{RESULTS_URL}"
+              <a href="{START_URL}"
                  style="background:#e67e22;color:#fff;padding:6px 14px;
                         border-radius:4px;text-decoration:none;font-weight:bold">
                 📋 Apply online (JKK)
