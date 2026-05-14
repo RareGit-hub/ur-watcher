@@ -281,11 +281,18 @@ def notify_line(matches: list[dict]) -> None:
         rent_total = parse_rent(p["rent"]) + parse_rent(p["fee"])
         st = wl.get("station_1", "")
         wk = wl.get("walk_1", "")
+        s_mins  = wl.get("shibuya", ""); s_xfers = wl.get("shibuya_transfers", "")
+        n_mins  = wl.get("shinjuku", ""); n_xfers = wl.get("shinjuku_transfers", "")
+        commute_line = ""
+        if str(s_mins) not in ("-", ""): commute_line += f"渋谷{s_mins}分({s_xfers}乗換) "
+        if str(n_mins) not in ("-", ""): commute_line += f"新宿{n_mins}分({n_xfers}乗換)"
+        building_url = wl.get("url", START_URL)
         msg += (
             f"\n■ {stars} {p['name']} ({p['area']})\n"
             f"  {normalize(p['madori'])} {p['sqm']}㎡ / ¥{rent_total:,}/月\n"
             f"  🚶 {st} {wk}\n"
-            f"  📋 {START_URL}\n"
+            f"  🚃 {commute_line.strip()}\n"
+            f"  🏠 {building_url}\n"
         )
     if len(matches) > 5:
         msg += f"\n...and {len(matches)-5} more — see email"
@@ -327,6 +334,18 @@ def notify_email(matches: list[dict]) -> None:
                     f"<tr><td style='padding:3px 8px;color:#555'>🚶</td>"
                     f"<td style='padding:3px 8px'>{st} {wk}</td></tr>"
                 )
+        # Commute to Shibuya / Shinjuku
+        for dest, key, xfer_key in [("渋谷", "shibuya", "shibuya_transfers"),
+                                     ("新宿", "shinjuku", "shinjuku_transfers")]:
+            mins  = wl.get(key, "")
+            xfers = wl.get(xfer_key, "")
+            if mins and str(mins) != "-":
+                xfer_str = f"乗換{xfers}回" if str(xfers) != "-" else ""
+                station_rows += (
+                    f"<tr><td style='padding:3px 8px;color:#555'>🚃</td>"
+                    f"<td style='padding:3px 8px'>{dest}まで<strong>{mins}分</strong>"
+                    f"<span style='color:#888;font-size:11px;margin-left:4px'>({xfer_str})</span></td></tr>"
+                )
 
         rows += f"""
         <tr><td colspan="2" style="padding:0">
@@ -363,13 +382,13 @@ def notify_email(matches: list[dict]) -> None:
           </tr>
           <tr>
             <td colspan="2" style="padding:8px 10px;border-top:1px solid #eee">
-              <a href="{START_URL}"
+              <a href="{wl.get('url', '')}"
                  style="background:#e67e22;color:#fff;padding:6px 14px;
                         border-radius:4px;text-decoration:none;font-weight:bold">
-                📋 Apply online (JKK)
+                🏠 Building page → Apply
               </a>
               &nbsp;&nbsp;
-              <a href="{wl.get('url', '')}" style="color:#2980b9">🏠 Building page</a>
+              <a href="{START_URL}" style="color:#2980b9;font-size:12px">JKK Search</a>
             </td>
           </tr>
         </table></td></tr>"""
