@@ -306,6 +306,10 @@ def notify_email(matches: list[dict]) -> None:
     if not all([GMAIL_ADDRESS, GMAIL_APP_PASSWORD, NOTIFY_EMAIL]):
         print("Email not configured"); return
 
+    # Sort ⭐⭐⭐ → ⭐⭐ → ⭐
+    star_order = {"⭐⭐⭐": 0, "⭐⭐": 1, "⭐": 2}
+    matches = sorted(matches, key=lambda m: star_order.get(get_stars(m["whitelist"]), 3))
+
     rows = ""
     for m in matches:
         p, wl = m["prop"], m["whitelist"]

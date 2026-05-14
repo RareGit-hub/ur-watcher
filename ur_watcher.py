@@ -363,12 +363,18 @@ def notify_email(new_props: list[dict]) -> None:
     if not all([GMAIL_ADDRESS, GMAIL_APP_PASSWORD, NOTIFY_EMAIL]):
         print("Email credentials not set — skipping"); return
 
-    rows = ""
+    # Fetch all details first, compute stars, then sort ⭐⭐⭐ → ⭐⭐ → ⭐
+    enriched = []
     for p in new_props:
         print(f"  Fetching details for {p['name']}...")
         details = get_property_details(p["url"])
         stars = get_ur_stars(p, details)
+        enriched.append((stars, p, details))
+    star_order = {"⭐⭐⭐": 0, "⭐⭐": 1, "⭐": 2}
+    enriched.sort(key=lambda x: star_order.get(x[0], 3))
 
+    rows = ""
+    for stars, p, details in enriched:
         is_discount = p.get("normal_rent_yen", 0) and p["normal_rent_yen"] != p["rent_yen"]
         rent_cell = (
             f"<s style='color:#aaa'>¥{p['normal_rent_yen']:,}</s> → "
