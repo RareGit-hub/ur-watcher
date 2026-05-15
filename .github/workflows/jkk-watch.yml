@@ -1,12 +1,7 @@
-name: UR Property Watcher
+name: JKK Property Watcher
 
 on:
   workflow_dispatch:
-    inputs:
-      debug_mode:
-        description: 'Enable debug mode (saves screenshot + HTML)'
-        type: boolean
-        default: false
 
 jobs:
   watch:
@@ -41,30 +36,18 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: playwright install-deps chromium
 
-      - name: Run UR watcher
+      - name: Run JKK watcher
         env:
           GMAIL_ADDRESS:      ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL:       ${{ secrets.NOTIFY_EMAIL }}
           LINE_CHANNEL_TOKEN: ${{ secrets.LINE_CHANNEL_TOKEN }}
           LINE_USER_ID:       ${{ secrets.LINE_USER_ID }}
-          DEBUG_MODE:         ${{ github.event.inputs.debug_mode || 'false' }}
-        run: python ur_watcher.py
-
-      - name: Upload debug files
-        if: ${{ github.event.inputs.debug_mode == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-output
-          path: |
-            debug_regular.png
-            debug_regular.html
-            debug_tokubetsu.png
-            debug_tokubetsu.html
+        run: python jkk_watcher.py
 
       - name: Commit updated state
         run: |
           git config user.name  "ur-watcher-bot"
           git config user.email "actions@github.com"
-          git add seen_ids.json
-          git diff --staged --quiet || (git commit -m "chore: update seen_ids [skip ci]" && git pull --rebase && git push)
+          git add jkk_seen.json
+          git diff --staged --quiet || (git commit -m "chore: update jkk_seen [skip ci]" && git pull --rebase && git push)
