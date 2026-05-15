@@ -483,7 +483,9 @@ def _select_room_and_apply(page, max_rent: int) -> int | None:
         let bestBtn = null, bestRent = {max_rent + 1};
         for (const row of document.querySelectorAll('table tr')) {{
             for (const cell of row.querySelectorAll('td')) {{
-                const num = parseInt(cell.innerText.replace(/[^\\d]/g,''));
+                const m = cell.innerText.match(/[\\d,]+/);
+                if (!m) continue;
+                const num = parseInt(m[0].replace(/,/g, ''));
                 if (num >= 50000 && num <= {max_rent} && num < bestRent) {{
                     const btn = row.querySelector('img[alt="申込"], img[src*="mousikomi"]');
                     if (btn) {{ bestBtn = btn; bestRent = num; }}
