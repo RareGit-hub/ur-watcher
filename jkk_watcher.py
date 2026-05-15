@@ -170,24 +170,35 @@ def _extract_all_pages(page) -> list[dict]:
         return false;
     }""")
     if clicked_50:
-        page.wait_for_load_state("networkidle", timeout=8_000)
+        page.wait_for_selector('table', timeout=10_000)
 
     page_num = 1
     while True:
-        print(f"  Page {page_num}...", end=" ")
+        print(f"  Page {page_num}...", end=" ", flush=True)
         rows = page.evaluate(JS_EXTRACT)
         props.extend(rows)
         print(f"{len(rows)} rows (total {len(props)})")
         if clicked_50: break
+
         next_num = page_num + 1
-        more = page.evaluate(f"""() => {{
-            for (const el of document.querySelectorAll(
-                    'button[class*="MuiPaginationItem"], a, input'))
-                if ((el.innerText||el.value||'').trim()==='{next_num}') {{ el.click(); return true; }}
+        has_next = page.evaluate(f"""() => {{
+            for (const el of document.querySelectorAll('a'))
+                if (el.innerText.trim() === '{next_num}') return true;
             return false;
         }}""")
-        if not more: break
-        page.wait_for_load_state("networkidle", timeout=8_000)
+        if not has_next: break
+
+        try:
+            with page.expect_navigation(wait_until="domcontentloaded", timeout=15_000):
+                page.evaluate(f"""() => {{
+                    for (const el of document.querySelectorAll('a'))
+                        if (el.innerText.trim() === '{next_num}') {{ el.click(); return; }}
+                }}""")
+            page.wait_for_selector('table', timeout=10_000)
+        except Exception as e:
+            print(f"  Pagination error on page {next_num}: {e}")
+            break
+
         page_num += 1
         if page_num > 20: break
     return props
