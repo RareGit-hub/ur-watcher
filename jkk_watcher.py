@@ -471,46 +471,31 @@ def _new_page(ctx):
     return p
 
 
-def _login(ctx) -> object:
-    """Log in to JKK. Returns logged-in page."""
-    page = _new_page(ctx)
-    print("  [login] Loading mypageMenu...")
-    page.goto(MYPAGE_URL, wait_until="domcontentloaded", timeout=60_000)
-    # Wait for こちら link to appear
-    page.wait_for_selector("a:has-text('こちら')", timeout=15_000)
+def _login(page) -> bool:
+    """Fill login credentials on the current page. Returns True if successful."""
+    print("  [login] Filling credentials...")
+    try:
+        page.wait_for_selector(
+            'input[name="loginRM.loginM.userId"]', timeout=10_000
+        )
+    except PWTimeout:
+        print("  [login] No login form found on this page")
+        return False
 
-    link_info = page.evaluate("""() => {
-        const a = [...document.querySelectorAll('a')].find(a => a.innerText.includes('こちら'));
-        return a ? { target: a.target||'', onclick: a.getAttribute('onclick')||'' } : null;
-    }""")
+    page.fill('input[name="loginRM.loginM.userId"]', JKK_ID)
+    page.fill('input[name="loginRM.loginM.password"]', JKK_PASSWORD)
 
-    opens_new_tab = link_info and (
-        link_info.get('target') == '_blank' or 'open(' in link_info.get('onclick', '')
-    )
-
-    if opens_new_tab:
-        with ctx.expect_page(timeout=15_000) as lp_info:
-            page.evaluate("() => { window.dblclickFlg = true; submitNext(); }")
-        login_page = lp_info.value
-        login_page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    else:
-        page.evaluate("() => { window.dblclickFlg = true; submitNext(); }")
-        login_page = page
-
-    # Wait for ID field — fires the instant the form is ready
-    login_page.wait_for_selector('input[name="loginRM.loginM.userId"]', timeout=15_000)
-    print(f"  [login] Form ready at: {login_page.url}")
-
-    login_page.fill('input[name="loginRM.loginM.userId"]', JKK_ID)
-    login_page.fill('input[name="loginRM.loginM.password"]', JKK_PASSWORD)
-
-    with login_page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
-        login_page.evaluate("""() => {
-            const btn = document.querySelector('input[type="image"]') ||
-                        document.querySelector('input[type="submit"]');
-            if (btn) btn.click(); else document.querySelector('form').submit();
+    with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
+        page.evaluate("""() => {
+            const btn =
+                document.querySelector('img[alt*="ログイン"]') ||
+                document.querySelector('input[type="image"]') ||
+                document.querySelector('input[type="submit"]');
+            if (btn) btn.click(); else document.querySelector('form').requestSubmit();
         }""")
-    # Wait for post-login page to be usable
+    page.wait_for_timeout(2_000)
+    print(f"  [login] After login: {page.url}")
+    return True
     login_page.wait_for_selector('body', timeout=10_000)
     print(f"  [login] Logged in at: {login_page.url}")
     return login_page
@@ -539,9 +524,8 @@ def _select_room_and_apply(page, max_rent: int) -> int | None:
         for (const row of document.querySelectorAll('table tr')) {{
             for (const cell of row.querySelectorAll('td')) {{
                 const num = parseInt(cell.innerText.replace(/[^\\d]/g,''));
-                if (num >= 10000 && num <= {max_rent} && num < bestRent) {{
-                    const btn = [...row.querySelectorAll('input[type="image"]')]
-                        .find(b => !b.src.includes('naiken') && !b.src.includes('detail'));
+                if (num >= 50000 && num <= {max_rent} && num < bestRent) {{
+                    const btn = row.querySelector('img[alt="申込"], img[src*="mousikomi"]');
                     if (btn) {{ bestBtn = btn; bestRent = num; }}
                 }}
             }}
@@ -555,31 +539,35 @@ def _complete_application(page, ctx) -> bool:
     """Steps 5-8: eligibility → consent → details form → confirm → submit."""
 
     # ── Step 5: 申込資格確認 ──────────────────────────────────────────────────
-    page.wait_for_selector("a:has-text('申込資格')", timeout=15_000)
+    page.wait_for_selector('img[alt="申込資格について"]', timeout=15_000)
     print("  [apply] 申込資格確認...")
     try:
         with ctx.expect_page(timeout=8_000) as info_info:
             page.evaluate("""() => {
-                const l = [...document.querySelectorAll('a')]
-                    .find(l => l.innerText.includes('申込資格'));
-                if (l) l.click();
+                document.querySelector('img[alt="申込資格について"]')?.click();
             }""")
         tab = info_info.value
         tab.wait_for_load_state("domcontentloaded", timeout=8_000)
         tab.close()
     except PWTimeout:
-        pass  # Info tab didn't open — button still becomes clickable
+        pass
 
-    # Wait for 同意する to be present, then click it (first image button)
-    page.wait_for_selector('input[type="image"]', timeout=10_000)
+    # Click active 同意する (not the grey disabled version)
+    page.wait_for_selector('img[alt="同意する"]', timeout=10_000)
     with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
-        page.evaluate("() => { document.querySelectorAll('input[type=\"image\"]')[0]?.click(); }")
+        page.evaluate("""() => {
+            const btns = [...document.querySelectorAll('img[alt="同意する"]')];
+            const active = btns.find(b => !b.src.includes('glay')) || btns[0];
+            if (active) active.click();
+        }""")
 
     # ── Step 6: 申込審査情報の確認 → 申込内容入力へ ───────────────────────────
-    page.wait_for_selector('input[type="image"]', timeout=15_000)
+    page.wait_for_selector('img[alt*="申込内容入力"]', timeout=15_000)
     print("  [apply] 申込審査情報の確認...")
     with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
-        page.evaluate("() => { document.querySelectorAll('input[type=\"image\"]')[0]?.click(); }")
+        page.evaluate("""() => {
+            document.querySelector('img[alt*="申込内容入力"]')?.click();
+        }""")
 
     # ── Step 7: 申込内容入力 → fill → 内容確認へ ─────────────────────────────
     page.wait_for_selector('input[name*="mskInputRM"]', timeout=15_000)
@@ -600,19 +588,20 @@ def _complete_application(page, ctx) -> bool:
     except Exception as e:
         print(f"  [apply] Housing select: {e}")
 
-    page.wait_for_selector('input[type="image"]', timeout=10_000)
+    page.wait_for_selector('img[alt*="内容確認"]', timeout=10_000)
     with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
-        page.evaluate("() => { document.querySelector('input[type=\"image\"]')?.click(); }")
+        page.evaluate("""() => {
+            document.querySelector('img[alt*="内容確認"]')?.click();
+        }""")
 
     # ── Step 8: 申込内容の確認 → 同意して申し込む ────────────────────────────
-    page.wait_for_selector('input[type="image"], a', timeout=15_000)
+    page.wait_for_selector('img[alt*="同意して申し込む"], img[alt*="申し込む"]', timeout=15_000)
     print("  [apply] 同意して申し込む...")
     with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
         page.evaluate("""() => {
-            const btns = [...document.querySelectorAll('input[type="image"], a')];
-            const submit = btns.find(b =>
-                (b.innerText||b.alt||b.value||'').includes('申し込む'));
-            (submit || document.querySelector('input[type="image"]'))?.click();
+            const btn = document.querySelector('img[alt*="同意して申し込む"]') ||
+                        document.querySelector('img[alt*="申し込む"]');
+            if (btn) btn.click();
         }""")
 
     # ── Check for 申込完了 ────────────────────────────────────────────────────
@@ -636,10 +625,8 @@ def scrape_and_apply_session(autoapply: dict, seen: set) -> tuple[list, list]:
     with sync_playwright() as pw:
         browser, ctx = _make_ctx(pw)
         try:
-            # Login once
-            page = _login(ctx)
-
-            # Search + scrape
+            # Search first (no login needed)
+            page = _new_page(ctx)
             _run_search_flow(page)
             available = _extract_all_pages(page)
             print(f"  Available: {len(available)} listings")
@@ -685,16 +672,16 @@ def scrape_and_apply_session(autoapply: dict, seen: set) -> tuple[list, list]:
                 result = {"name": pname, "madori": normalize(prop["madori"]),
                           "success": False, "rent": 0, "error": ""}
                 try:
-                    # Re-search to get a fresh results page for each apply
+                    # Re-search for fresh results page
                     _run_search_flow(page)
 
                     if not _click_detail(page, pname):
                         result["error"] = "Not found (already taken?)"
                         apply_results.append(result); continue
 
-                    # Wait for detail page
                     page.wait_for_selector('table', timeout=15_000)
 
+                    # Click 申込 — server redirects to login
                     rent = _select_room_and_apply(page, MAX_RENT_YEN)
                     if not rent:
                         result["error"] = "No room within budget"
@@ -703,6 +690,12 @@ def scrape_and_apply_session(autoapply: dict, seen: set) -> tuple[list, list]:
                     result["rent"] = rent
                     page.wait_for_load_state("domcontentloaded", timeout=15_000)
 
+                    # Login on the redirect page
+                    if not _login(page):
+                        result["error"] = "Login failed"
+                        apply_results.append(result); continue
+
+                    # Complete application form
                     success = _complete_application(page, ctx)
                     result["success"] = success
                     if not success:
