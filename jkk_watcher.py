@@ -99,12 +99,101 @@ def save_seen(seen):
 
 # ─── Scraper ──────────────────────────────────────────────────────────────────
 
+JS_EXTRACT = """() => {
+    const results = [];
+    let t = null;
+    for (const tbl of document.querySelectorAll('table'))
+        if (tbl.innerText.includes('住宅名') && tbl.innerText.includes('間取り')) { t = tbl; break; }
+    if (!t) return results;
+    const allRows = [...t.querySelectorAll('tr')];
+    let hi = -1;
+    for (let i = 0; i < allRows.length; i++)
+        if (allRows[i].innerText.includes('住宅名') && allRows[i].innerText.includes('間取り')) { hi = i; break; }
+    if (hi < 0) return results;
+    for (let i = hi+1; i < allRows.length; i++) {
+        const cells = [...allRows[i].querySelectorAll('td')];
+        if (cells.length < 8) continue;
+        const t = (idx) => (cells[idx]?.innerText||'').trim().replace(/[\\s]+/g,' ');
+        const name=t(1), area=t(2), madori=t(5), sqm=t(6), rent=t(7), fee=t(8), units=t(9);
+        if (name && madori && rent) results.push({name,area,madori,sqm,rent,fee,units});
+    }
+    return results;
+}"""
+
+JS_POST_FORWARD = """() => {
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = 'https://jhomes.to-kousya.or.jp/search/jkknet/service/akiyaJyoukenStartInit';
+    [['redirect','true'],
+     ['url','https://jhomes.to-kousya.or.jp/search/jkknet/service/akiyaJyoukenStartInit']]
+    .forEach(([n,v]) => {
+        const i = document.createElement('input');
+        i.type='hidden'; i.name=n; i.value=v;
+        form.appendChild(i);
+    });
+    document.body.appendChild(form);
+    form.submit();
+}"""
+
+
+def _run_search_flow(page) -> object:
+    """POST forwardForm → wait for search button → click 検索する → results page."""
+    with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
+        page.evaluate(JS_POST_FORWARD)
+    page.wait_for_selector(
+        'a[onclick*="submitPage"], img[alt*="検索"]', timeout=15_000
+    )
+    with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
+        page.evaluate("""() => {
+            const btn = document.querySelector('a[onclick*="submitPage"]')
+                       || document.querySelector('img[alt*="検索"]');
+            if (btn) btn.click();
+        }""")
+    page.wait_for_selector('table', timeout=20_000)
+    if "akiyaJyoukenRef" not in page.url:
+        raise Exception(f"Search failed — at {page.url}")
+    print(f"  Results at: {page.url}")
+    return page
+
+
+def _extract_all_pages(page) -> list[dict]:
+    """Extract listings across all pages of the results."""
+    props = []
+    clicked_50 = page.evaluate("""() => {
+        for (const el of document.querySelectorAll('a, input, button, td, span'))
+            if ((el.innerText || el.value || '').trim() === '50件') { el.click(); return true; }
+        return false;
+    }""")
+    if clicked_50:
+        page.wait_for_load_state("networkidle", timeout=8_000)
+
+    page_num = 1
+    while True:
+        print(f"  Page {page_num}...", end=" ")
+        rows = page.evaluate(JS_EXTRACT)
+        props.extend(rows)
+        print(f"{len(rows)} rows (total {len(props)})")
+        if clicked_50: break
+        next_num = page_num + 1
+        more = page.evaluate(f"""() => {{
+            for (const el of document.querySelectorAll(
+                    'button[class*="MuiPaginationItem"], a, input'))
+                if ((el.innerText||el.value||'').trim()==='{next_num}') {{ el.click(); return true; }}
+            return false;
+        }}""")
+        if not more: break
+        page.wait_for_load_state("networkidle", timeout=8_000)
+        page_num += 1
+        if page_num > 20: break
+    return props
+
+
 def scrape_available() -> list[dict]:
+    """Non-login scrape — fallback when JKK credentials not configured."""
     props = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled"]
+            headless=True, args=["--disable-blink-features=AutomationControlled"]
         )
         ctx = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -114,86 +203,9 @@ def scrape_available() -> list[dict]:
         page = ctx.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         try:
-            print("  Loading splash page...")
             page.goto(START_URL, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(4_000)
-            print(f"  At: {page.url}")
-
-            print("  POSTing forwardForm...")
-            with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
-                page.evaluate("""() => {
-                    const form = document.createElement('form');
-                    form.method = 'post';
-                    form.action = 'https://jhomes.to-kousya.or.jp/search/jkknet/service/akiyaJyoukenStartInit';
-                    [['redirect','true'],['url','https://jhomes.to-kousya.or.jp/search/jkknet/service/akiyaJyoukenStartInit']]
-                    .forEach(([n,v]) => {
-                        const i = document.createElement('input');
-                        i.type='hidden'; i.name=n; i.value=v;
-                        form.appendChild(i);
-                    });
-                    document.body.appendChild(form);
-                    form.submit();
-                }""")
-            page.wait_for_timeout(3_000)
-
-            print("  Clicking 検索する...")
-            with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
-                page.evaluate("""() => {
-                    const btn = document.querySelector('a[onclick*="submitPage"]')
-                               || document.querySelector('img[alt*="検索"]');
-                    if (btn) btn.click();
-                }""")
-            page.wait_for_timeout(3_000)
-            print(f"  Results at: {page.url}")
-
-            if "akiyaJyoukenRef" not in page.url:
-                print("  Not on results page, aborting"); return props
-
-            clicked_50 = page.evaluate("""() => {
-                for (const el of document.querySelectorAll('a, input, button, td, span'))
-                    if ((el.innerText || el.value || '').trim() === '50件') { el.click(); return true; }
-                return false;
-            }""")
-            if clicked_50:
-                page.wait_for_timeout(4_000)
-
-            page_num = 1
-            while True:
-                print(f"  Page {page_num}...", end=" ")
-                rows = page.evaluate("""() => {
-                    const results = [];
-                    let t = null;
-                    for (const tbl of document.querySelectorAll('table'))
-                        if (tbl.innerText.includes('住宅名') && tbl.innerText.includes('間取り')) { t = tbl; break; }
-                    if (!t) return results;
-                    const allRows = [...t.querySelectorAll('tr')];
-                    let hi = -1;
-                    for (let i = 0; i < allRows.length; i++)
-                        if (allRows[i].innerText.includes('住宅名') && allRows[i].innerText.includes('間取り')) { hi = i; break; }
-                    if (hi < 0) return results;
-                    for (let i = hi+1; i < allRows.length; i++) {
-                        const cells = [...allRows[i].querySelectorAll('td')];
-                        if (cells.length < 8) continue;
-                        const t = (idx) => (cells[idx]?.innerText||'').trim().replace(/[\\s]+/g,' ');
-                        const name=t(1), area=t(2), madori=t(5), sqm=t(6), rent=t(7), fee=t(8), units=t(9);
-                        if (name && madori && rent) results.push({name,area,madori,sqm,rent,fee,units});
-                    }
-                    return results;
-                }""")
-                props.extend(rows)
-                print(f"{len(rows)} rows (total {len(props)})")
-                if clicked_50: break
-                next_num = page_num + 1
-                more = page.evaluate(f"""() => {{
-                    for (const el of document.querySelectorAll('button[class*="MuiPaginationItem"], a, input'))
-                        if ((el.innerText||el.value||'').trim()==='{next_num}') {{ el.click(); return true; }}
-                    return false;
-                }}""")
-                if not more: break
-                page.wait_for_timeout(3_000)
-                page_num += 1
-                if page_num > 20: break
-
+            _run_search_flow(page)
+            props = _extract_all_pages(page)
         except PWTimeout:
             print("  Timeout on JKK site")
         except Exception as e:
@@ -381,12 +393,22 @@ def notify_email(matches: list[dict]) -> None:
 def main():
     print(f"=== JKK Watcher {datetime.now():%Y-%m-%d %H:%M} ===")
     whitelist = load_whitelist()
+    autoapply = load_autoapply()
     if not whitelist:
         print("No whitelist — run: python jkk_scan.py --build-whitelist"); return
-    print(f"Whitelist: {len(whitelist)} properties")
+    print(f"Whitelist: {len(whitelist)} | AutoApply: {len(autoapply)} properties")
 
-    seen      = load_seen()
-    available = scrape_available()
+    seen = load_seen()
+    apply_results = []
+
+    # ── Single session when credentials available (login + scrape + apply) ────
+    if JKK_ID and JKK_PASSWORD:
+        print("  JKK credentials found — using single logged-in session")
+        available, apply_results = scrape_and_apply_session(autoapply, seen)
+    else:
+        print("  No JKK credentials — scrape only (no auto-apply)")
+        available = scrape_available()
+
     print(f"Available listings: {len(available)}")
 
     new_matches = []
@@ -406,6 +428,9 @@ def main():
     seen.update(all_ids)
     save_seen(seen)
     print(f"New matches: {len(new_matches)}")
+
+    if apply_results:
+        notify_line_apply(apply_results)
     if not new_matches:
         print("No new listings — done."); return
     notify_line(new_matches)
@@ -413,3 +438,304 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ─── Auto-Apply Bot ───────────────────────────────────────────────────────────
+
+MYPAGE_URL     = "https://jhomes.to-kousya.or.jp/search/jkknet/service/mypageMenu"
+AUTOAPPLY_FILE = Path("jkk_autoapply.json")
+JKK_ID         = os.environ.get("JKK_ID", "").strip()
+JKK_PASSWORD   = os.environ.get("JKK_PASSWORD", "").strip()
+
+
+def load_autoapply() -> dict:
+    if not AUTOAPPLY_FILE.exists(): return {}
+    return json.loads(AUTOAPPLY_FILE.read_text(encoding="utf-8"))
+
+
+def _make_ctx(pw):
+    browser = pw.chromium.launch(
+        headless=True, args=["--disable-blink-features=AutomationControlled"]
+    )
+    ctx = browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        locale="ja-JP", timezone_id="Asia/Tokyo",
+        extra_http_headers={"Accept-Language": "ja,en-US;q=0.9,en;q=0.8"},
+    )
+    return browser, ctx
+
+
+def _new_page(ctx):
+    p = ctx.new_page()
+    p.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    return p
+
+
+def _login(ctx) -> object:
+    """Log in to JKK. Returns logged-in page."""
+    page = _new_page(ctx)
+    print("  [login] Loading mypageMenu...")
+    page.goto(MYPAGE_URL, wait_until="domcontentloaded", timeout=60_000)
+    # Wait for こちら link to appear
+    page.wait_for_selector("a:has-text('こちら')", timeout=15_000)
+
+    link_info = page.evaluate("""() => {
+        const a = [...document.querySelectorAll('a')].find(a => a.innerText.includes('こちら'));
+        return a ? { target: a.target||'', onclick: a.getAttribute('onclick')||'' } : null;
+    }""")
+
+    opens_new_tab = link_info and (
+        link_info.get('target') == '_blank' or 'open(' in link_info.get('onclick', '')
+    )
+
+    if opens_new_tab:
+        with ctx.expect_page(timeout=15_000) as lp_info:
+            page.evaluate("() => { window.dblclickFlg = true; submitNext(); }")
+        login_page = lp_info.value
+        login_page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    else:
+        page.evaluate("() => { window.dblclickFlg = true; submitNext(); }")
+        login_page = page
+
+    # Wait for ID field — fires the instant the form is ready
+    login_page.wait_for_selector('input[name="loginRM.loginM.userId"]', timeout=15_000)
+    print(f"  [login] Form ready at: {login_page.url}")
+
+    login_page.fill('input[name="loginRM.loginM.userId"]', JKK_ID)
+    login_page.fill('input[name="loginRM.loginM.password"]', JKK_PASSWORD)
+
+    with login_page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
+        login_page.evaluate("""() => {
+            const btn = document.querySelector('input[type="image"]') ||
+                        document.querySelector('input[type="submit"]');
+            if (btn) btn.click(); else document.querySelector('form').submit();
+        }""")
+    # Wait for post-login page to be usable
+    login_page.wait_for_selector('body', timeout=10_000)
+    print(f"  [login] Logged in at: {login_page.url}")
+    return login_page
+
+
+def _click_detail(page, prop_name: str) -> bool:
+    """Click the 詳細 button for the named property. Returns True if found."""
+    print(f"  [apply] Clicking 詳細 for {prop_name}...")
+    return page.evaluate(f"""() => {{
+        for (const row of document.querySelectorAll('table tr')) {{
+            const cells = [...row.querySelectorAll('td')];
+            if (cells.length < 9) continue;
+            if (cells[1]?.innerText.trim() !== '{prop_name}') continue;
+            const btn = cells[cells.length-1]?.querySelector('input[type="image"], a');
+            if (btn) {{ btn.click(); return true; }}
+        }}
+        return false;
+    }}""")
+
+
+def _select_room_and_apply(page, max_rent: int) -> int | None:
+    """Click 申込 for the cheapest room within budget. Returns rent or None."""
+    print(f"  [apply] Selecting room (max ¥{max_rent:,})...")
+    return page.evaluate(f"""() => {{
+        let bestBtn = null, bestRent = {max_rent + 1};
+        for (const row of document.querySelectorAll('table tr')) {{
+            for (const cell of row.querySelectorAll('td')) {{
+                const num = parseInt(cell.innerText.replace(/[^\\d]/g,''));
+                if (num >= 10000 && num <= {max_rent} && num < bestRent) {{
+                    const btn = [...row.querySelectorAll('input[type="image"]')]
+                        .find(b => !b.src.includes('naiken') && !b.src.includes('detail'));
+                    if (btn) {{ bestBtn = btn; bestRent = num; }}
+                }}
+            }}
+        }}
+        if (bestBtn) {{ bestBtn.click(); return bestRent; }}
+        return null;
+    }}""")
+
+
+def _complete_application(page, ctx) -> bool:
+    """Steps 5-8: eligibility → consent → details form → confirm → submit."""
+
+    # ── Step 5: 申込資格確認 ──────────────────────────────────────────────────
+    page.wait_for_selector("a:has-text('申込資格')", timeout=15_000)
+    print("  [apply] 申込資格確認...")
+    try:
+        with ctx.expect_page(timeout=8_000) as info_info:
+            page.evaluate("""() => {
+                const l = [...document.querySelectorAll('a')]
+                    .find(l => l.innerText.includes('申込資格'));
+                if (l) l.click();
+            }""")
+        tab = info_info.value
+        tab.wait_for_load_state("domcontentloaded", timeout=8_000)
+        tab.close()
+    except PWTimeout:
+        pass  # Info tab didn't open — button still becomes clickable
+
+    # Wait for 同意する to be present, then click it (first image button)
+    page.wait_for_selector('input[type="image"]', timeout=10_000)
+    with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
+        page.evaluate("() => { document.querySelectorAll('input[type=\"image\"]')[0]?.click(); }")
+
+    # ── Step 6: 申込審査情報の確認 → 申込内容入力へ ───────────────────────────
+    page.wait_for_selector('input[type="image"]', timeout=15_000)
+    print("  [apply] 申込審査情報の確認...")
+    with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
+        page.evaluate("() => { document.querySelectorAll('input[type=\"image\"]')[0]?.click(); }")
+
+    # ── Step 7: 申込内容入力 → fill → 内容確認へ ─────────────────────────────
+    page.wait_for_selector('input[name*="mskInputRM"]', timeout=15_000)
+    print("  [apply] Filling form...")
+    page.evaluate("""() => {
+        [
+            ['input[name="mskInputRM.mskInputM.chusyajoFlg"][value="0"]', 'click'],
+            ['input[name="mskInputRM.mskInputM.hojinFlg"][value="0"]',    'click'],
+            ['input[name="mskInputRM.mskInputM.shareFlg"][value="0"]',    'click'],
+            ['input[name="mskInputRM.mskInputM.hoshoFlg"][value="2"]',    'click'],
+        ].forEach(([sel, fn]) => document.querySelector(sel)?.[fn]());
+    }""")
+    try:
+        page.select_option(
+            'select[name="mskInputRM.mskInputM.jukyoCdH"]',
+            label='UR(公団)賃貸住宅'
+        )
+    except Exception as e:
+        print(f"  [apply] Housing select: {e}")
+
+    page.wait_for_selector('input[type="image"]', timeout=10_000)
+    with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
+        page.evaluate("() => { document.querySelector('input[type=\"image\"]')?.click(); }")
+
+    # ── Step 8: 申込内容の確認 → 同意して申し込む ────────────────────────────
+    page.wait_for_selector('input[type="image"], a', timeout=15_000)
+    print("  [apply] 同意して申し込む...")
+    with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
+        page.evaluate("""() => {
+            const btns = [...document.querySelectorAll('input[type="image"], a')];
+            const submit = btns.find(b =>
+                (b.innerText||b.alt||b.value||'').includes('申し込む'));
+            (submit || document.querySelector('input[type="image"]'))?.click();
+        }""")
+
+    # ── Check for 申込完了 ────────────────────────────────────────────────────
+    print(f"  [apply] Final: {page.url}")
+    return page.evaluate("""() =>
+        ['申込完了','申込が完了','受付番号','お申し込みが完了']
+            .some(s => document.body.innerText.includes(s))
+    """)
+
+
+def scrape_and_apply_session(autoapply: dict, seen: set) -> tuple[list, list]:
+    """
+    Single Playwright session: login → search → scrape → apply.
+    Returns (available_listings, apply_results).
+    Faster than two separate sessions — eliminates duplicate browser startup,
+    login, and search flow.
+    """
+    available    = []
+    apply_results = []
+
+    with sync_playwright() as pw:
+        browser, ctx = _make_ctx(pw)
+        try:
+            # Login once
+            page = _login(ctx)
+
+            # Search + scrape
+            _run_search_flow(page)
+            available = _extract_all_pages(page)
+            print(f"  Available: {len(available)} listings")
+
+            # Identify autoapply matches that are new
+            apply_queue = [
+                p for p in available
+                if match_whitelist(p["name"], autoapply)
+                and make_id(p) not in seen
+                and parse_rent(p["rent"]) <= MAX_RENT_YEN
+                and (not ALLOWED_MADORI or is_allowed_madori(p["madori"]))
+            ]
+
+            # Sort by score and take only the top 1 (JKK allows one application at a time)
+            def _score(prop):
+                wl = match_whitelist(prop["name"], autoapply) or {}
+                s  = safe_int(wl.get("shibuya",  999))
+                sx = safe_int(wl.get("shibuya_transfers", 0), 0)
+                n  = safe_int(wl.get("shinjuku", 999))
+                nx = safe_int(wl.get("shinjuku_transfers", 0), 0)
+                best_eff  = min(s + sx*5, n + nx*5)
+                yr_m = re.search(r'(\d{4})年', wl.get("built", ""))
+                year = int(yr_m.group(1)) if yr_m else 1990
+                tier = next((t for w, t in WARD_TIERS.items()
+                             if w in wl.get("location", "")), 0)
+                rent = parse_rent(prop["rent"])
+                c = max(0, (55 - best_eff) / 55 * 10)
+                ny = max(0, (year - 1989) / (2025 - 1989) * 10)
+                w = {1:10, 2:6.5, 3:3, 0:0}.get(tier, 0)
+                p2 = max(0, (160000 - rent) / (160000 - 67000) * 10)
+                return c*4 + ny*3 + w*2 + p2*1
+
+            apply_queue.sort(key=_score, reverse=True)
+            if len(apply_queue) > 1:
+                skipped = [p["name"] for p in apply_queue[1:]]
+                print(f"  Skipping {skipped} — applying for highest-ranked only")
+                apply_queue = apply_queue[:1]
+
+            print(f"  AutoApply queue: {len(apply_queue)} propert(ies)")
+
+            for prop in apply_queue:
+                pname  = prop["name"]
+                result = {"name": pname, "madori": normalize(prop["madori"]),
+                          "success": False, "rent": 0, "error": ""}
+                try:
+                    # Re-search to get a fresh results page for each apply
+                    _run_search_flow(page)
+
+                    if not _click_detail(page, pname):
+                        result["error"] = "Not found (already taken?)"
+                        apply_results.append(result); continue
+
+                    # Wait for detail page
+                    page.wait_for_selector('table', timeout=15_000)
+
+                    rent = _select_room_and_apply(page, MAX_RENT_YEN)
+                    if not rent:
+                        result["error"] = "No room within budget"
+                        apply_results.append(result); continue
+
+                    result["rent"] = rent
+                    page.wait_for_load_state("domcontentloaded", timeout=15_000)
+
+                    success = _complete_application(page, ctx)
+                    result["success"] = success
+                    if not success:
+                        result["error"] = "Did not reach 申込完了"
+                    print(f"  {'✓' if success else '✗'} {pname}: "
+                          f"{'Applied!' if success else result['error']}")
+
+                except Exception as e:
+                    result["error"] = str(e)
+                    print(f"  ✗ {pname}: {e}")
+
+                apply_results.append(result)
+
+        except Exception as e:
+            print(f"  Session error: {e}")
+        finally:
+            browser.close()
+
+    return available, apply_results
+
+
+def notify_line_apply(apply_results: list[dict]) -> None:
+    if not LINE_CHANNEL_TOKEN or not LINE_USER_ID: return
+    msg = "🤖 JKK Auto-Apply Results:\n"
+    for r in apply_results:
+        icon = "✅" if r["success"] else "❌"
+        rent = f"¥{r['rent']:,}" if r["rent"] else ""
+        err  = f" ({r['error']})" if not r["success"] else ""
+        msg += f"{icon} {r['name']} {r['madori']} {rent}{err}\n"
+    requests.post(
+        "https://api.line.me/v2/bot/message/push",
+        headers={"Authorization": f"Bearer {LINE_CHANNEL_TOKEN}",
+                 "Content-Type": "application/json"},
+        json={"to": LINE_USER_ID, "messages": [{"type": "text", "text": msg}]},
+        timeout=10,
+    )
