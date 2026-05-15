@@ -60,6 +60,26 @@ LINE_CHANNEL_TOKEN = "".join(os.environ.get("LINE_CHANNEL_TOKEN", "").split())
 LINE_USER_ID       = os.environ.get("LINE_USER_ID", "").strip()
 DEBUG_MODE         = os.environ.get("DEBUG_MODE", "false").lower() == "true"
 STATE_FILE         = Path("seen_ids.json")
+# ─── Ward tiers ───────────────────────────────────────────────────────────────
+
+WARD_TIERS = {
+    "渋谷区": 1, "港区": 1, "目黒区": 1, "世田谷区": 1,
+    "新宿区": 1, "千代田区": 1, "文京区": 1,
+    "品川区": 2, "杉並区": 2, "中野区": 2, "豊島区": 2,
+    "中央区": 2, "台東区": 2, "江東区": 2, "墨田区": 2, "大田区": 2,
+    "板橋区": 3, "練馬区": 3, "北区": 3,
+    "荒川区": 3, "足立区": 3, "葛飾区": 3, "江戸川区": 3,
+}
+WARD_BADGE = {1: "🟢", 2: "🟡", 3: "🔴", 0: "⚫"}
+WARD_COLOR = {1: "#27ae60", 2: "#f39c12", 3: "#e74c3c", 0: "#7f8c8d"}
+
+def get_ward_info(text: str) -> tuple:
+    for ward, tier in WARD_TIERS.items():
+        if ward in text:
+            return WARD_BADGE[tier], ward, WARD_COLOR[tier], tier
+    return WARD_BADGE[0], "", WARD_COLOR[0], 0
+
+
 
 
 def load_seen() -> set:
@@ -280,34 +300,33 @@ def get_property_details(url: str) -> dict:
     return result
 
 
-def get_ur_stars(p: dict, details: dict) -> str:
-    """Rate a UR listing: ⭐⭐⭐ / ⭐⭐ / ⭐"""
-    # Parse commute time from first commute line (e.g. "東京駅から高島平駅まで40分")
+def get_ur_stars(p: dict, details: dict) -> tuple:
+    """Rate a UR listing → (stars_str, reason_str)."""
     commute_mins = 999
     for line in p.get("commute_lines", []):
         m = re.search(r'まで(\d+)分', line)
-        if m:
-            commute_mins = min(commute_mins, int(m.group(1)))
+        if m: commute_mins = min(commute_mins, int(m.group(1)))
 
-    # Parse walk time from nearest station (e.g. "高島平駅 徒歩2～11分")
     walk_mins = 999
     for st in p.get("nearest_stations", []):
         m = re.search(r'徒歩(\d+)', st)
-        if m:
-            walk_mins = min(walk_mins, int(m.group(1)))
+        if m: walk_mins = min(walk_mins, int(m.group(1)))
 
-    # Parse build year from detail page (e.g. "1989年（築37年）")
     year_match = re.search(r'(\d{4})年', details.get("building_age", ""))
     built_year = int(year_match.group(1)) if year_match else 0
-
-    renovated = details.get("renovation", False)
+    renovated  = details.get("renovation", False)
 
     if commute_mins <= 30 and walk_mins <= 15 and (built_year >= 2010 or renovated):
-        return "⭐⭐⭐"
+        return "⭐⭐⭐", ""
     elif commute_mins <= 35 and walk_mins <= 15:
-        return "⭐⭐"
+        if renovated: return "⭐⭐", "リノベ済"
+        return "⭐⭐", f"築{built_year}年" if built_year else "築年不明"
     else:
-        return "⭐"
+        reasons = []
+        if walk_mins > 15:  reasons.append(f"徒歩{walk_mins}分")
+        if commute_mins > 35: reasons.append(f"通勤{commute_mins}分")
+        if built_year and built_year < 2010 and not renovated: reasons.append(f"築{built_year}年")
+        return "⭐", " / ".join(reasons)
 
 
 def matches(p: dict, prefecture_filter: list | None = None) -> bool:
@@ -361,88 +380,141 @@ def notify_line(new_props: list[dict]) -> None:
 
 def notify_email(new_props: list[dict]) -> None:
     if not all([GMAIL_ADDRESS, GMAIL_APP_PASSWORD, NOTIFY_EMAIL]):
-        print("Email credentials not set — skipping"); return
+        print("Email not configured"); return
 
-    # Fetch all details first, compute stars, then sort ⭐⭐⭐ → ⭐⭐ → ⭐
+    # Fetch all details, compute stars+ward, then sort
     enriched = []
     for p in new_props:
         print(f"  Fetching details for {p['name']}...")
         details = get_property_details(p["url"])
-        stars = get_ur_stars(p, details)
-        enriched.append((stars, p, details))
+        stars, reason = get_ur_stars(p, details)
+        wb, ward_name, wc, tier = get_ward_info(details.get("address", "") + p.get("name",""))
+        enriched.append((stars, reason, wb, ward_name, wc, p, details))
+
     star_order = {"⭐⭐⭐": 0, "⭐⭐": 1, "⭐": 2}
     enriched.sort(key=lambda x: star_order.get(x[0], 3))
 
-    rows = ""
-    for stars, p, details in enriched:
+    # ── Summary table ──────────────────────────────────────────────────────────
+    summary_rows = ""
+    for stars, reason, wb, ward_name, wc, p, details in enriched:
+        is_discount = p.get("normal_rent_yen", 0) and p["normal_rent_yen"] != p["rent_yen"]
+        rent_str = f"¥{p['rent_yen']:,}" + (" 🔖" if is_discount else "")
+        yr_m = re.search(r'(\d{4})年', details.get("building_age", ""))
+        yr = yr_m.group(1) if yr_m else "不明"
+        commute = p.get("commute_lines", [])
+        commute_short = re.search(r'まで(\d+)分', commute[0]).group(0)[2:] if commute and re.search(r'まで(\d+)分', commute[0]) else "?"
+        nearest = p.get("nearest_stations", [])
+        walk_short = re.search(r'徒歩(\d+)', nearest[0]).group(0) if nearest and re.search(r'徒歩(\d+)', nearest[0]) else "?"
+        summary_rows += f"""
+        <tr style="border-bottom:1px solid #eee">
+          <td style="padding:7px 10px;font-weight:bold;font-size:13px">{p['name']}</td>
+          <td style="padding:7px 8px;text-align:center">{stars}</td>
+          <td style="padding:7px 8px;text-align:center">
+            <span style="background:{wc};color:#fff;border-radius:10px;padding:2px 7px;font-size:11px">{wb} {ward_name}</span>
+          </td>
+          <td style="padding:7px 8px;text-align:center;white-space:nowrap">{commute_short}</td>
+          <td style="padding:7px 8px;text-align:center;white-space:nowrap">{walk_short}</td>
+          <td style="padding:7px 8px;text-align:right;white-space:nowrap;font-size:13px">{rent_str}</td>
+          <td style="padding:7px 8px;text-align:center;font-size:12px">{yr}</td>
+        </tr>"""
+
+    summary_table = f"""
+    <table width="100%" style="border-collapse:collapse;border:1px solid #ddd;
+           border-radius:8px;margin-bottom:24px;font-size:13px;overflow:hidden">
+      <tr style="background:#2c3e50;color:#fff">
+        <th style="padding:9px 10px;text-align:left">物件</th>
+        <th style="padding:9px 8px">★</th>
+        <th style="padding:9px 8px">エリア</th>
+        <th style="padding:9px 8px">通勤</th>
+        <th style="padding:9px 8px">徒歩</th>
+        <th style="padding:9px 8px;text-align:right">家賃</th>
+        <th style="padding:9px 8px">築年</th>
+      </tr>
+      {summary_rows}
+    </table>"""
+
+    # ── Individual cards ───────────────────────────────────────────────────────
+    cards = ""
+    for stars, reason, wb, ward_name, wc, p, details in enriched:
         is_discount = p.get("normal_rent_yen", 0) and p["normal_rent_yen"] != p["rent_yen"]
         rent_cell = (
             f"<s style='color:#aaa'>¥{p['normal_rent_yen']:,}</s> → "
-            f"<b style='color:#c0392b'>¥{p['rent_yen']:,}</b> "
-            f"<small>({p.get('discount_period','')} discount)</small>"
-            if is_discount else f"¥{p['rent_yen']:,}"
+            f"<strong style='color:#c0392b;font-size:16px'>¥{p['rent_yen']:,}</strong>"
+            f"<span style='color:#888;font-size:12px'> ({p.get('discount_period','')} discount)</span>"
+            if is_discount else
+            f"<strong style='color:#c0392b;font-size:16px'>¥{p['rent_yen']:,}</strong>"
         )
         label_color = "#c0392b" if "Special" in p["label"] else "#2980b9"
-        reno_badge = (
-            "<span style='background:#27ae60;color:#fff;border-radius:3px;"
-            "padding:1px 5px;font-size:11px;margin-left:4px'>🔧 リノベ済</span>"
-            if details["renovation"] else ""
-        )
+        reno_badge  = ("<span style='background:#27ae60;color:#fff;border-radius:3px;"
+                       "padding:1px 5px;font-size:11px;margin-left:4px'>🔧 リノベ済</span>"
+                       if details.get("renovation") else "")
 
-        commute_rows = ""
+        # Commute line
+        commute_parts = []
         for line in p.get("commute_lines", []):
-            commute_rows += f"<tr><td style='padding:3px 8px;color:#555;white-space:nowrap'>🚃</td><td style='padding:3px 8px'>{line}</td></tr>"
-        for st in p.get("nearest_stations", []):
-            commute_rows += f"<tr><td style='padding:3px 8px;color:#555'>🚶</td><td style='padding:3px 8px'>{st}</td></tr>"
+            commute_parts.append(f"<strong>{line}</strong>")
+        commute_html = " &nbsp;·&nbsp; ".join(commute_parts[:2]) if commute_parts else "通勤情報なし"
 
-        maps_link = (
-            f"<a href='{details['maps_url']}' style='color:#2980b9'>📍 Google Maps</a>"
-            if details.get("maps_url") else ""
-        )
-        sales_center = (
-            f"<div style='margin-top:4px;color:#666;font-size:12px'>🏢 {details['sales_center']}</div>"
-            if details.get("sales_center") else ""
-        )
+        # Walk + build year
+        nearest = p.get("nearest_stations", [])
+        walk_html = " &nbsp;·&nbsp; ".join(f"<strong>{st}</strong>" for st in nearest[:2]) if nearest else ""
+        yr_m = re.search(r'(\d{4})年', details.get("building_age", ""))
+        built_str = f"🏗 {yr_m.group(1)}年" if yr_m else f"🏗 {details.get('building_age','不明')}"
+        if details.get("renovation"): built_str += " (リノベ済)"
 
-        rows += f"""
-        <tr><td colspan="5" style="padding:0">
-        <table width="100%" style="border-collapse:collapse;border:2px solid #ddd;border-radius:6px;margin-bottom:14px">
-          <tr style="background:#f0f4f8">
-            <td colspan="2" style="padding:10px">
-              <span style="background:{label_color};color:#fff;border-radius:3px;padding:2px 6px;font-size:11px">{p['label']}</span>
-              {reno_badge}
-              <strong style="margin-left:8px;font-size:15px">{p['name']}</strong>
-              <span style="margin-left:6px;font-size:16px">{stars}</span>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:8px 10px;width:45%;vertical-align:top">
-              <table style="border-collapse:collapse">
-                <tr><td style="padding:3px 8px;color:#555">間取り</td><td style="padding:3px 8px"><strong>{p['madori']}</strong></td></tr>
-                <tr><td style="padding:3px 8px;color:#555">面積</td><td style="padding:3px 8px">{p['sqm']}㎡</td></tr>
-                <tr><td style="padding:3px 8px;color:#555">家賃/月</td><td style="padding:3px 8px"><strong>{rent_cell}</strong></td></tr>
-                <tr><td style="padding:3px 8px;color:#555">築年</td><td style="padding:3px 8px">{details['building_age']}</td></tr>
-              </table>
-            </td>
-            <td style="padding:8px 10px;vertical-align:top">
-              <table style="border-collapse:collapse">{commute_rows}</table>
-            </td>
-          </tr>
-          <tr>
-            <td colspan="2" style="padding:6px 10px;border-top:1px solid #eee">
-              <a href="{p['url']}" style="color:#2980b9;font-weight:bold">🔗 物件詳細を見る</a>
-              &nbsp;&nbsp;{maps_link}
-              {sales_center}
-            </td>
-          </tr>
-        </table></td></tr>"""
+        # Skip reason
+        reason_html = (f"<div style='padding:4px 14px 8px;font-size:12px;color:#e67e22'>⚠️ {reason}</div>"
+                       if reason else "")
 
-    html = f"""<html><body style="font-family:sans-serif;max-width:700px;margin:0 auto;padding:20px">
-    <h2 style="color:#2c3e50">🏠 {len(new_props)} New UR Listing(s)</h2>
-    <table width="100%" style="border-collapse:collapse">{rows}</table>
-    <p style="color:#888;font-size:0.85em;margin-top:16px">
-        Checked: {datetime.now().strftime('%Y-%m-%d %H:%M')} JST<br>
-        Filters: max ¥{int(MAX_RENT_MAN_YEN * 10000):,}/mo · layouts: {', '.join(ALLOWED_MADORI) or 'any'}
+        # Maps link
+        maps_link = (f'<a href="{details["maps_url"]}" style="color:#2980b9;font-size:13px">📍 Google Maps</a>'
+                     if details.get("maps_url") else "")
+
+        # Sales center
+        sc_html = (f"<div style='margin-top:4px;color:#666;font-size:12px'>🏢 {details['sales_center']}</div>"
+                   if details.get("sales_center") else "")
+
+        border_color = {"⭐⭐⭐": "#27ae60", "⭐⭐": "#2980b9", "⭐": "#95a5a6"}.get(stars, "#ddd")
+
+        cards += f"""
+        <div style="border:2px solid {border_color};border-radius:8px;margin-bottom:18px;font-family:sans-serif;overflow:hidden">
+          <div style="background:#f8f9fa;padding:10px 14px;border-bottom:1px solid #eee">
+            <span style="background:{label_color};color:#fff;border-radius:3px;padding:2px 6px;font-size:11px">{p['label']}</span>
+            {reno_badge}
+            <span style="font-size:16px;margin-left:6px">{stars}</span>
+            <strong style="font-size:15px;margin-left:6px">{p['name']}</strong>
+            <span style="background:{wc};color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;margin-left:8px">{wb} {ward_name}</span>
+          </div>
+          <div style="padding:9px 14px;background:#fafafa;border-bottom:1px solid #eee;font-size:13px">
+            🚃 {commute_html}
+          </div>
+          <div style="padding:6px 14px;background:#fafafa;border-bottom:1px solid #eee;font-size:13px">
+            🚶 {walk_html} &nbsp;·&nbsp; {built_str}
+          </div>
+          <div style="padding:10px 14px">
+            <span style="font-size:16px;font-weight:bold">{p['madori']}</span>
+            &nbsp; {p['sqm']}㎡ &nbsp;·&nbsp;
+            {rent_cell}
+          </div>
+          {reason_html}
+          <div style="padding:8px 14px;border-top:1px solid #eee">
+            <a href="{p['url']}"
+               style="background:{label_color};color:#fff;padding:7px 14px;border-radius:4px;
+                      text-decoration:none;font-weight:bold;font-size:14px">
+              🔗 物件詳細を見る
+            </a>
+            &nbsp;&nbsp;{maps_link}
+            {sc_html}
+          </div>
+        </div>"""
+
+    html = f"""<html><body style="font-family:sans-serif;max-width:620px;margin:0 auto;padding:16px;background:#fff">
+    <h2 style="color:#2c3e50;margin-bottom:16px">🏠 {len(enriched)} New UR Listing(s)</h2>
+    {summary_table}
+    {cards}
+    <p style="color:#aaa;font-size:11px;margin-top:8px">
+      {datetime.now().strftime('%Y-%m-%d %H:%M')} JST ·
+      max ¥{int(MAX_RENT_YEN * 10000):,}/mo · {', '.join(ALLOWED_MADORI) or 'any layout'}
     </p>
     </body></html>"""
 
