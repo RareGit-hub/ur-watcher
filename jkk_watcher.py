@@ -400,59 +400,6 @@ def load_autoapply() -> dict:
     return json.loads(AUTOAPPLY_FILE.read_text(encoding="utf-8"))
 
 
-def main():
-    print(f"=== JKK Watcher {datetime.now():%Y-%m-%d %H:%M} ===")
-    whitelist = load_whitelist()
-    autoapply = load_autoapply()
-    if not whitelist:
-        print("No whitelist — run: python jkk_scan.py --build-whitelist"); return
-    print(f"Whitelist: {len(whitelist)} | AutoApply: {len(autoapply)} properties")
-
-    seen = load_seen()
-    apply_results = []
-
-    # ── Single session when credentials available (login + scrape + apply) ────
-    if JKK_ID and JKK_PASSWORD:
-        print("  JKK credentials found — using single logged-in session")
-        available, apply_results = scrape_and_apply_session(autoapply, seen)
-    else:
-        print("  No JKK credentials — scrape only (no auto-apply)")
-        available = scrape_available()
-
-    print(f"Available listings: {len(available)}")
-
-    new_matches = []
-    all_ids = set()
-    for prop in available:
-        pid = make_id(prop)
-        all_ids.add(pid)
-        if pid in seen: continue
-        wl = match_whitelist(prop["name"], whitelist)
-        if not wl: continue
-        if ALLOWED_MADORI and not is_allowed_madori(prop["madori"]): continue
-        if parse_rent(prop["rent"]) > MAX_RENT_YEN: continue
-        new_matches.append({"prop": prop, "whitelist": wl, "id": pid})
-        stars, _ = get_stars(wl)
-        print(f"  ✓ {stars} {prop['name']} {normalize(prop['madori'])} ¥{parse_rent(prop['rent']):,}")
-
-    seen.update(all_ids)
-    save_seen(seen)
-    print(f"New matches: {len(new_matches)}")
-
-    if apply_results:
-        notify_line_apply(apply_results)
-    if not new_matches:
-        print("No new listings — done."); return
-    notify_line(new_matches)
-    notify_email(new_matches)
-
-if __name__ == "__main__":
-    main()
-
-
-# ─── Auto-Apply Bot ───────────────────────────────────────────────────────────
-
-
 def _make_ctx(pw):
     browser = pw.chromium.launch(
         headless=True, args=["--disable-blink-features=AutomationControlled"]
@@ -732,3 +679,56 @@ def notify_line_apply(apply_results: list[dict]) -> None:
         json={"to": LINE_USER_ID, "messages": [{"type": "text", "text": msg}]},
         timeout=10,
     )
+
+def main():
+    print(f"=== JKK Watcher {datetime.now():%Y-%m-%d %H:%M} ===")
+    whitelist = load_whitelist()
+    autoapply = load_autoapply()
+    if not whitelist:
+        print("No whitelist — run: python jkk_scan.py --build-whitelist"); return
+    print(f"Whitelist: {len(whitelist)} | AutoApply: {len(autoapply)} properties")
+
+    seen = load_seen()
+    apply_results = []
+
+    # ── Single session when credentials available (login + scrape + apply) ────
+    if JKK_ID and JKK_PASSWORD:
+        print("  JKK credentials found — using single logged-in session")
+        available, apply_results = scrape_and_apply_session(autoapply, seen)
+    else:
+        print("  No JKK credentials — scrape only (no auto-apply)")
+        available = scrape_available()
+
+    print(f"Available listings: {len(available)}")
+
+    new_matches = []
+    all_ids = set()
+    for prop in available:
+        pid = make_id(prop)
+        all_ids.add(pid)
+        if pid in seen: continue
+        wl = match_whitelist(prop["name"], whitelist)
+        if not wl: continue
+        if ALLOWED_MADORI and not is_allowed_madori(prop["madori"]): continue
+        if parse_rent(prop["rent"]) > MAX_RENT_YEN: continue
+        new_matches.append({"prop": prop, "whitelist": wl, "id": pid})
+        stars, _ = get_stars(wl)
+        print(f"  ✓ {stars} {prop['name']} {normalize(prop['madori'])} ¥{parse_rent(prop['rent']):,}")
+
+    seen.update(all_ids)
+    save_seen(seen)
+    print(f"New matches: {len(new_matches)}")
+
+    if apply_results:
+        notify_line_apply(apply_results)
+    if not new_matches:
+        print("No new listings — done."); return
+    notify_line(new_matches)
+    notify_email(new_matches)
+
+if __name__ == "__main__":
+    main()
+
+
+# ─── Auto-Apply Bot ───────────────────────────────────────────────────────────
+
