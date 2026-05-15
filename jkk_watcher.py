@@ -656,7 +656,8 @@ def scrape_and_apply_session(autoapply: dict, seen: set) -> tuple[list, list]:
                     page.wait_for_selector('table', timeout=15_000)
 
                     # Click 申込 — server redirects to login
-                    rent = _select_room_and_apply(page, MAX_RENT_YEN)
+                    max_rent = 9_999_999 if JKK_TEST_PROPERTY else MAX_RENT_YEN
+                    rent = _select_room_and_apply(page, max_rent)
                     if not rent:
                         result["error"] = "No room within budget"
                         apply_results.append(result); continue
