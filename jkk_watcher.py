@@ -283,43 +283,7 @@ def notify_email(matches: list[dict]) -> None:
     star_order = {"⭐⭐⭐": 0, "⭐⭐": 1, "⭐": 2}
     matches = sorted(matches, key=lambda m: star_order.get(get_stars(m["whitelist"])[0], 3))
 
-    # ── Summary table ──────────────────────────────────────────────────────────
-    summary_rows = ""
-    for m in matches:
-        p, wl = m["prop"], m["whitelist"]
-        stars, _ = get_stars(wl)
-        wb, ward_name, wc, _ = get_ward_info(p["area"])
-        s = wl.get("shibuya","?"); n = wl.get("shinjuku","?")
-        rent_str = f"¥{parse_rent(p['rent']):,}"
-        yr_m = re.search(r'(\d{4})年', wl.get('built',''))
-        yr = yr_m.group(1) if yr_m else '不明'
-        summary_rows += f"""
-        <tr style="border-bottom:1px solid #eee">
-          <td style="padding:7px 10px;font-weight:bold">{p['name']}</td>
-          <td style="padding:7px 8px;text-align:center">{stars}</td>
-          <td style="padding:7px 8px;text-align:center">
-            <span style="background:{wc};color:#fff;border-radius:10px;padding:2px 7px;font-size:11px">{wb} {ward_name}</span>
-          </td>
-          <td style="padding:7px 8px;text-align:center;white-space:nowrap">渋{s}分 / 新{n}分</td>
-          <td style="padding:7px 8px;text-align:right;white-space:nowrap">{rent_str}</td>
-          <td style="padding:7px 8px;text-align:center">{yr}</td>
-        </tr>"""
-
-    summary_table = f"""
-    <table width="100%" style="border-collapse:collapse;border:1px solid #ddd;
-           border-radius:8px;margin-bottom:24px;font-size:13px;overflow:hidden">
-      <tr style="background:#2c3e50;color:#fff">
-        <th style="padding:9px 10px;text-align:left">物件</th>
-        <th style="padding:9px 8px">★</th>
-        <th style="padding:9px 8px">エリア</th>
-        <th style="padding:9px 8px">通勤</th>
-        <th style="padding:9px 8px;text-align:right">家賃</th>
-        <th style="padding:9px 8px">築年</th>
-      </tr>
-      {summary_rows}
-    </table>"""
-
-    # ── Individual cards ───────────────────────────────────────────────────────
+    # ── Individual cards (mobile-first, single column) ─────────────────────────
     cards = ""
     for m in matches:
         p, wl = m["prop"], m["whitelist"]
@@ -329,74 +293,101 @@ def notify_email(matches: list[dict]) -> None:
         fee_yen  = parse_rent(p["fee"])
         madori   = normalize(p["madori"])
 
-        # Commute line
         s_mins = wl.get("shibuya",""); s_xf = wl.get("shibuya_transfers","")
         n_mins = wl.get("shinjuku",""); n_xf = wl.get("shinjuku_transfers","")
-        commute_parts = []
-        if str(s_mins) not in ("-",""): commute_parts.append(f"渋谷<strong>{s_mins}分</strong><span style='color:#888;font-size:11px'>({s_xf}乗換)</span>")
-        if str(n_mins) not in ("-",""): commute_parts.append(f"新宿<strong>{n_mins}分</strong><span style='color:#888;font-size:11px'>({n_xf}乗換)</span>")
-        commute_html = " &nbsp;·&nbsp; ".join(commute_parts)
+        commute_rows = ""
+        if str(s_mins) not in ("-",""):
+            commute_rows += f"<tr><td style='padding:2px 0;color:#555;font-size:14px'>🚃 渋谷</td><td style='padding:2px 8px;font-size:14px'><strong>{s_mins}分</strong> <span style='color:#888;font-size:12px'>({s_xf}乗換)</span></td></tr>"
+        if str(n_mins) not in ("-",""):
+            commute_rows += f"<tr><td style='padding:2px 0;color:#555;font-size:14px'>🚃 新宿</td><td style='padding:2px 8px;font-size:14px'><strong>{n_mins}分</strong> <span style='color:#888;font-size:12px'>({n_xf}乗換)</span></td></tr>"
 
-        # Walk + build year
-        walk_str  = f"🚶 {wl.get('station_1','')} {wl.get('walk_1','')}"
+        walk_str  = f"{wl.get('station_1','')} 徒歩{wl.get('walk_1','')}分"
         yr_m = re.search(r'(\d{4})年', wl.get('built',''))
-        built_str = f"🏗 {yr_m.group(1)}年" if yr_m else ""
+        built_str = f"築{yr_m.group(1)}年" if yr_m else ""
 
-        # Skip reason badge
         reason_html = ""
         if reason:
-            reason_html = f"<div style='padding:4px 14px 8px;font-size:12px;color:#e67e22'>⚠️ {reason}</div>"
+            reason_html = f"<div style='padding:6px 14px;font-size:13px;color:#e67e22;border-top:1px solid #eee'>⚠️ {reason}</div>"
 
-        # Border color by stars
         border_color = {"⭐⭐⭐": "#27ae60", "⭐⭐": "#2980b9", "⭐": "#95a5a6"}.get(stars, "#ddd")
-
         building_url = wl.get('url', START_URL)
 
         cards += f"""
-        <div style="border:2px solid {border_color};border-radius:8px;margin-bottom:18px;font-family:sans-serif;overflow:hidden">
-          <div style="background:#f8f9fa;padding:10px 14px;border-bottom:1px solid #eee">
-            <span style="background:#e67e22;color:#fff;border-radius:3px;padding:2px 6px;font-size:11px">JKK</span>
-            <span style="font-size:16px;margin-left:6px">{stars}</span>
-            <strong style="font-size:15px;margin-left:6px">{p['name']}</strong>
-            <span style="background:{wc};color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;margin-left:8px">{wb} {ward_name}</span>
-            <span style="color:#666;font-size:12px;margin-left:6px">{p['area']}</span>
-          </div>
-          <div style="padding:9px 14px;background:#fafafa;border-bottom:1px solid #eee;font-size:13px">
-            🚃 {commute_html} &nbsp;·&nbsp; {walk_str} &nbsp;·&nbsp; {built_str}
-          </div>
-          <div style="padding:10px 14px">
-            <span style="font-size:16px;font-weight:bold">{madori}</span>
-            &nbsp; {p['sqm']}㎡ &nbsp;·&nbsp;
-            <span style="font-size:16px;font-weight:bold;color:#c0392b">¥{rent_yen:,}</span>
-            <span style="color:#888;font-size:12px"> + ¥{fee_yen:,} 共益費 · {p['units']}戸</span>
-          </div>
+        <table width="100%" cellpadding="0" cellspacing="0"
+               style="border:2px solid {border_color};border-radius:8px;
+                      margin-bottom:18px;font-family:sans-serif;
+                      border-collapse:separate;overflow:hidden">
+          <!-- Header -->
+          <tr>
+            <td style="background:#f8f9fa;padding:10px 14px;border-bottom:1px solid #eee">
+              <div style="margin-bottom:4px">
+                <span style="background:#e67e22;color:#fff;border-radius:3px;
+                             padding:2px 6px;font-size:11px">JKK</span>
+                <span style="font-size:15px;margin-left:6px">{stars}</span>
+                <span style="background:{wc};color:#fff;border-radius:10px;
+                             padding:2px 8px;font-size:11px;margin-left:6px">{wb} {ward_name}</span>
+              </div>
+              <div style="font-size:16px;font-weight:bold;color:#222;
+                          word-break:break-all">{p['name']}</div>
+              <div style="color:#666;font-size:13px;margin-top:2px">{p['area']}</div>
+            </td>
+          </tr>
+          <!-- Commute + walk + built -->
+          <tr>
+            <td style="padding:10px 14px;background:#fafafa;border-bottom:1px solid #eee">
+              <table cellpadding="0" cellspacing="0">
+                {commute_rows}
+                <tr>
+                  <td style="padding:2px 0;color:#555;font-size:14px">🚶</td>
+                  <td style="padding:2px 8px;font-size:14px">{walk_str}</td>
+                </tr>
+                <tr>
+                  <td style="padding:2px 0;color:#555;font-size:14px">🏗</td>
+                  <td style="padding:2px 8px;font-size:14px">{built_str}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Rent -->
+          <tr>
+            <td style="padding:12px 14px">
+              <span style="font-size:18px;font-weight:bold">{madori}</span>
+              <span style="font-size:14px;color:#555;margin-left:6px">{p['sqm']}㎡</span>
+              <br>
+              <span style="font-size:20px;font-weight:bold;color:#c0392b">¥{rent_yen:,}</span>
+              <span style="color:#888;font-size:13px"> + ¥{fee_yen:,} 共益費 · {p['units']}戸</span>
+            </td>
+          </tr>
           {reason_html}
-          <div style="padding:8px 14px;border-top:1px solid #eee">
-            <a href="{building_url}"
-               style="background:#e67e22;color:#fff;padding:7px 14px;border-radius:4px;
-                      text-decoration:none;font-weight:bold;font-size:14px">
-              🏠 Building page → Apply
-            </a>
-            &nbsp;&nbsp;
-            <a href="{START_URL}" style="color:#2980b9;font-size:12px">JKK Search</a>
-          </div>
-        </div>"""
+          <!-- CTA -->
+          <tr>
+            <td style="padding:10px 14px;border-top:1px solid #eee">
+              <a href="{building_url}"
+                 style="display:inline-block;background:#e67e22;color:#fff;
+                        padding:10px 18px;border-radius:4px;text-decoration:none;
+                        font-weight:bold;font-size:15px">
+                🏠 物件ページ → 申込
+              </a>
+              <br><br>
+              <a href="{START_URL}" style="color:#2980b9;font-size:13px">JKK 検索へ</a>
+            </td>
+          </tr>
+        </table>"""
 
-    html = f"""<html><body style="font-family:sans-serif;max-width:620px;margin:0 auto;padding:16px;background:#fff">
-    <h2 style="color:#e67e22;margin-bottom:16px">
-      🏠 {len(matches)} JKK Whitelist Listing(s) Now Available
+    html = f"""<html><body style="font-family:sans-serif;max-width:600px;
+    margin:0 auto;padding:12px;background:#fff">
+    <h2 style="color:#e67e22;margin-bottom:16px;font-size:20px">
+      🏠 {len(matches)}件 JKK空き物件あり
     </h2>
-    {summary_table}
     {cards}
-    <p style="color:#aaa;font-size:11px;margin-top:8px">
-      {datetime.now().strftime('%Y-%m-%d %H:%M')} JST ·
-      max ¥{MAX_RENT_YEN:,}/mo
+    <p style="color:#aaa;font-size:12px;margin-top:8px">
+      {datetime.now().strftime('%Y-%m-%d %H:%M')} JST · max ¥{MAX_RENT_YEN:,}/mo
     </p>
     </body></html>"""
 
     msg = MIMEMultipart("alternative")
     msg["From"], msg["To"] = GMAIL_ADDRESS, NOTIFY_EMAIL
-    msg["Subject"] = f"[JKK Alert] {len(matches)} whitelist listing(s) available"
+    msg["Subject"] = f"[JKK Alert] {len(matches)}件 whitelist物件あり"
     msg.attach(MIMEText(html, "html", "utf-8"))
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
