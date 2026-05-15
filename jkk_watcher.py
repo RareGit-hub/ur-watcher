@@ -479,6 +479,20 @@ def _click_detail(page, prop_name: str) -> bool:
 def _select_room_and_apply(page, max_rent: int) -> int | None:
     """Click 申込 for the cheapest room within budget. Returns rent or None."""
     print(f"  [apply] Selecting room (max ¥{max_rent:,})...")
+    # Debug: show what numbers are found in the table
+    debug = page.evaluate("""() => {
+        const nums = [];
+        for (const row of document.querySelectorAll('table tr'))
+            for (const cell of row.querySelectorAll('td')) {
+                const m = cell.innerText.match(/[\\d,]+/);
+                if (m) {
+                    const n = parseInt(m[0].replace(/,/g,''));
+                    if (n >= 1000) nums.push(n);
+                }
+            }
+        return [...new Set(nums)].sort((a,b)=>a-b).slice(0,20);
+    }""")
+    print(f"  [apply] Numbers found in table: {debug}")
     return page.evaluate(f"""() => {{
         let bestBtn = null, bestRent = {max_rent + 1};
         for (const row of document.querySelectorAll('table tr')) {{
@@ -662,6 +676,7 @@ def scrape_and_apply_session(autoapply: dict, seen: set) -> tuple[list, list]:
                     rent = _select_room_and_apply(page, max_rent)
                     if not rent:
                         result["error"] = "No room within budget"
+                        print(f"  ✗ {pname}: No room within budget")
                         apply_results.append(result); continue
 
                     result["rent"] = rent
