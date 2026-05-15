@@ -43,6 +43,8 @@ jobs:
           NOTIFY_EMAIL:       ${{ secrets.NOTIFY_EMAIL }}
           LINE_CHANNEL_TOKEN: ${{ secrets.LINE_CHANNEL_TOKEN }}
           LINE_USER_ID:       ${{ secrets.LINE_USER_ID }}
+          JKK_ID:             ${{ secrets.JKK_ID }}
+          JKK_PASSWORD:       ${{ secrets.JKK_PASSWORD }}
         run: python jkk_watcher.py
 
       - name: Commit updated state
