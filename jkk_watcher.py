@@ -15,9 +15,11 @@ load_dotenv()
 
 START_URL   = "https://jhomes.to-kousya.or.jp/search/jkknet/service/akiyaJyoukenStartInit"
 RESULTS_URL = "https://jhomes.to-kousya.or.jp/search/jkknet/service/akiyaJyoukenRef"
+MYPAGE_URL  = "https://jhomes.to-kousya.or.jp/search/jkknet/service/mypageMenu"
 
 WHITELIST_FILE = Path("jkk_whitelist.json")
 SEEN_FILE      = Path("jkk_seen.json")
+AUTOAPPLY_FILE = Path("jkk_autoapply.json")
 
 MAX_RENT_YEN   = 160000
 ALLOWED_MADORI = []
@@ -26,6 +28,9 @@ GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS", "").strip()
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
 NOTIFY_EMAIL       = os.environ.get("NOTIFY_EMAIL", "").strip()
 LINE_CHANNEL_TOKEN = "".join(os.environ.get("LINE_CHANNEL_TOKEN", "").split())
+LINE_USER_ID       = os.environ.get("LINE_USER_ID", "").strip()
+JKK_ID             = os.environ.get("JKK_ID", "").strip()
+JKK_PASSWORD       = os.environ.get("JKK_PASSWORD", "").strip()
 LINE_USER_ID       = os.environ.get("LINE_USER_ID", "").strip()
 
 # ─── Ward tiers ───────────────────────────────────────────────────────────────
@@ -446,11 +451,6 @@ if __name__ == "__main__":
 
 
 # ─── Auto-Apply Bot ───────────────────────────────────────────────────────────
-
-MYPAGE_URL     = "https://jhomes.to-kousya.or.jp/search/jkknet/service/mypageMenu"
-AUTOAPPLY_FILE = Path("jkk_autoapply.json")
-JKK_ID         = os.environ.get("JKK_ID", "").strip()
-JKK_PASSWORD   = os.environ.get("JKK_PASSWORD", "").strip()
 
 
 def _make_ctx(pw):
