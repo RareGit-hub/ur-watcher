@@ -390,6 +390,11 @@ def notify_email(matches: list[dict]) -> None:
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+def load_autoapply() -> dict:
+    if not AUTOAPPLY_FILE.exists(): return {}
+    return json.loads(AUTOAPPLY_FILE.read_text(encoding="utf-8"))
+
+
 def main():
     print(f"=== JKK Watcher {datetime.now():%Y-%m-%d %H:%M} ===")
     whitelist = load_whitelist()
@@ -446,11 +451,6 @@ MYPAGE_URL     = "https://jhomes.to-kousya.or.jp/search/jkknet/service/mypageMen
 AUTOAPPLY_FILE = Path("jkk_autoapply.json")
 JKK_ID         = os.environ.get("JKK_ID", "").strip()
 JKK_PASSWORD   = os.environ.get("JKK_PASSWORD", "").strip()
-
-
-def load_autoapply() -> dict:
-    if not AUTOAPPLY_FILE.exists(): return {}
-    return json.loads(AUTOAPPLY_FILE.read_text(encoding="utf-8"))
 
 
 def _make_ctx(pw):
