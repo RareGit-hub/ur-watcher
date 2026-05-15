@@ -3,6 +3,10 @@ name: JKK Property Watcher
 on:
   workflow_dispatch:
 
+concurrency:
+  group: jkk-watcher
+  cancel-in-progress: false
+
 jobs:
   watch:
     runs-on: ubuntu-latest
