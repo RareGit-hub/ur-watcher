@@ -45,6 +45,8 @@ jobs:
           LINE_USER_ID:       ${{ secrets.LINE_USER_ID }}
           JKK_ID:             ${{ secrets.JKK_ID }}
           JKK_PASSWORD:       ${{ secrets.JKK_PASSWORD }}
+          JKK_DRY_RUN:        ${{ secrets.JKK_DRY_RUN }}
+          JKK_TEST_PROPERTY:  ${{ secrets.JKK_TEST_PROPERTY }}
         run: python jkk_watcher.py
 
       - name: Commit updated state
