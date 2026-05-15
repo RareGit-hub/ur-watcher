@@ -31,6 +31,8 @@ LINE_CHANNEL_TOKEN = "".join(os.environ.get("LINE_CHANNEL_TOKEN", "").split())
 LINE_USER_ID       = os.environ.get("LINE_USER_ID", "").strip()
 JKK_ID             = os.environ.get("JKK_ID", "").strip()
 JKK_PASSWORD       = os.environ.get("JKK_PASSWORD", "").strip()
+JKK_DRY_RUN        = os.environ.get("JKK_DRY_RUN", "").lower() == "true"
+JKK_TEST_PROPERTY  = os.environ.get("JKK_TEST_PROPERTY", "").strip()
 LINE_USER_ID       = os.environ.get("LINE_USER_ID", "").strip()
 
 # ─── Ward tiers ───────────────────────────────────────────────────────────────
@@ -554,6 +556,9 @@ def _complete_application(page, ctx) -> bool:
 
     # ── Step 8: 申込内容の確認 → 同意して申し込む ────────────────────────────
     page.wait_for_selector('img[alt*="同意して申し込む"], img[alt*="申し込む"]', timeout=15_000)
+    if JKK_DRY_RUN:
+        print(f"  [apply] 🛑 DRY RUN — skipping final submit at {page.url}")
+        return True  # Treat as success for notification purposes
     print("  [apply] 同意して申し込む...")
     with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
         page.evaluate("""() => {
@@ -616,6 +621,17 @@ def scrape_and_apply_session(autoapply: dict, seen: set) -> tuple[list, list]:
                 w = {1:10, 2:6.5, 3:3, 0:0}.get(tier, 0)
                 p2 = max(0, (160000 - rent) / (160000 - 67000) * 10)
                 return c*4 + ny*3 + w*2 + p2*1
+
+            # Test override: force-apply for a specific property (for dry run testing)
+            if JKK_TEST_PROPERTY:
+                test_match = next((p for p in available
+                                   if JKK_TEST_PROPERTY in p["name"]
+                                   or p["name"] in JKK_TEST_PROPERTY), None)
+                if test_match:
+                    print(f"  TEST OVERRIDE: forcing apply for {test_match['name']}")
+                    apply_queue = [test_match]
+                else:
+                    print(f"  TEST OVERRIDE: '{JKK_TEST_PROPERTY}' not in current listings")
 
             apply_queue.sort(key=_score, reverse=True)
             if len(apply_queue) > 1:
