@@ -514,7 +514,7 @@ def notify_email(new_props: list[dict]) -> None:
     {cards}
     <p style="color:#aaa;font-size:11px;margin-top:8px">
       {datetime.now().strftime('%Y-%m-%d %H:%M')} JST ·
-      max ¥{int(MAX_RENT_YEN * 10000):,}/mo · {', '.join(ALLOWED_MADORI) or 'any layout'}
+      max ¥{int(MAX_RENT_MAN_YEN * 10000):,}/mo · {', '.join(ALLOWED_MADORI) or 'any layout'}
     </p>
     </body></html>"""
 
