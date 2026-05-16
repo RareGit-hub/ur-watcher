@@ -394,125 +394,112 @@ def notify_email(new_props: list[dict]) -> None:
     star_order = {"⭐⭐⭐": 0, "⭐⭐": 1, "⭐": 2}
     enriched.sort(key=lambda x: star_order.get(x[0], 3))
 
-    # ── Summary table ──────────────────────────────────────────────────────────
-    summary_rows = ""
-    for stars, reason, wb, ward_name, wc, p, details in enriched:
-        is_discount = p.get("normal_rent_yen", 0) and p["normal_rent_yen"] != p["rent_yen"]
-        rent_str = f"¥{p['rent_yen']:,}" + (" 🔖" if is_discount else "")
-        yr_m = re.search(r'(\d{4})年', details.get("building_age", ""))
-        yr = yr_m.group(1) if yr_m else "不明"
-        commute = p.get("commute_lines", [])
-        commute_short = re.search(r'まで(\d+)分', commute[0]).group(0)[2:] if commute and re.search(r'まで(\d+)分', commute[0]) else "?"
-        nearest = p.get("nearest_stations", [])
-        walk_short = re.search(r'徒歩(\d+)', nearest[0]).group(0) if nearest and re.search(r'徒歩(\d+)', nearest[0]) else "?"
-        summary_rows += f"""
-        <tr style="border-bottom:1px solid #eee">
-          <td style="padding:7px 10px;font-weight:bold;font-size:13px">{p['name']}</td>
-          <td style="padding:7px 8px;text-align:center">{stars}</td>
-          <td style="padding:7px 8px;text-align:center">
-            <span style="background:{wc};color:#fff;border-radius:10px;padding:2px 7px;font-size:11px">{wb} {ward_name}</span>
-          </td>
-          <td style="padding:7px 8px;text-align:center;white-space:nowrap">{commute_short}</td>
-          <td style="padding:7px 8px;text-align:center;white-space:nowrap">{walk_short}</td>
-          <td style="padding:7px 8px;text-align:right;white-space:nowrap;font-size:13px">{rent_str}</td>
-          <td style="padding:7px 8px;text-align:center;font-size:12px">{yr}</td>
-        </tr>"""
-
-    summary_table = f"""
-    <table width="100%" style="border-collapse:collapse;border:1px solid #ddd;
-           border-radius:8px;margin-bottom:24px;font-size:13px;overflow:hidden">
-      <tr style="background:#2c3e50;color:#fff">
-        <th style="padding:9px 10px;text-align:left">物件</th>
-        <th style="padding:9px 8px">★</th>
-        <th style="padding:9px 8px">エリア</th>
-        <th style="padding:9px 8px">通勤</th>
-        <th style="padding:9px 8px">徒歩</th>
-        <th style="padding:9px 8px;text-align:right">家賃</th>
-        <th style="padding:9px 8px">築年</th>
-      </tr>
-      {summary_rows}
-    </table>"""
-
-    # ── Individual cards ───────────────────────────────────────────────────────
+    # ── Individual cards (mobile-first, single column) ─────────────────────────
     cards = ""
     for stars, reason, wb, ward_name, wc, p, details in enriched:
         is_discount = p.get("normal_rent_yen", 0) and p["normal_rent_yen"] != p["rent_yen"]
         rent_cell = (
-            f"<s style='color:#aaa'>¥{p['normal_rent_yen']:,}</s> → "
-            f"<strong style='color:#c0392b;font-size:16px'>¥{p['rent_yen']:,}</strong>"
+            f"<s style='color:#aaa'>¥{p['normal_rent_yen']:,}</s><br>"
+            f"<span style='color:#c0392b;font-size:20px;font-weight:bold'>¥{p['rent_yen']:,}</span>"
             f"<span style='color:#888;font-size:12px'> ({p.get('discount_period','')} discount)</span>"
             if is_discount else
-            f"<strong style='color:#c0392b;font-size:16px'>¥{p['rent_yen']:,}</strong>"
+            f"<span style='color:#c0392b;font-size:20px;font-weight:bold'>¥{p['rent_yen']:,}</span>"
         )
         label_color = "#c0392b" if "Special" in p["label"] else "#2980b9"
         reno_badge  = ("<span style='background:#27ae60;color:#fff;border-radius:3px;"
                        "padding:1px 5px;font-size:11px;margin-left:4px'>🔧 リノベ済</span>"
                        if details.get("renovation") else "")
 
-        # Commute line
-        commute_parts = []
-        for line in p.get("commute_lines", []):
-            commute_parts.append(f"<strong>{line}</strong>")
-        commute_html = " &nbsp;·&nbsp; ".join(commute_parts[:2]) if commute_parts else "通勤情報なし"
+        # Commute rows
+        commute_rows = ""
+        for line in p.get("commute_lines", [])[:2]:
+            commute_rows += f"<tr><td style='padding:2px 0;font-size:14px'>🚃</td><td style='padding:2px 8px;font-size:14px'><strong>{line}</strong></td></tr>"
 
-        # Walk + build year
+        # Walk rows
         nearest = p.get("nearest_stations", [])
-        walk_html = " &nbsp;·&nbsp; ".join(f"<strong>{st}</strong>" for st in nearest[:2]) if nearest else ""
+        walk_rows = ""
+        for st in nearest[:2]:
+            walk_rows += f"<tr><td style='padding:2px 0;font-size:14px'>🚶</td><td style='padding:2px 8px;font-size:14px'><strong>{st}</strong></td></tr>"
+
         yr_m = re.search(r'(\d{4})年', details.get("building_age", ""))
-        built_str = f"🏗 {yr_m.group(1)}年" if yr_m else f"🏗 {details.get('building_age','不明')}"
+        built_str = f"築{yr_m.group(1)}年" if yr_m else details.get('building_age','不明')
         if details.get("renovation"): built_str += " (リノベ済)"
 
-        # Skip reason
-        reason_html = (f"<div style='padding:4px 14px 8px;font-size:12px;color:#e67e22'>⚠️ {reason}</div>"
+        reason_html = (f"<div style='padding:6px 14px;font-size:13px;color:#e67e22;border-top:1px solid #eee'>⚠️ {reason}</div>"
                        if reason else "")
-
-        # Maps link
         maps_link = (f'<a href="{details["maps_url"]}" style="color:#2980b9;font-size:13px">📍 Google Maps</a>'
                      if details.get("maps_url") else "")
-
-        # Sales center
-        sc_html = (f"<div style='margin-top:4px;color:#666;font-size:12px'>🏢 {details['sales_center']}</div>"
+        sc_html = (f"<div style='margin-top:6px;color:#666;font-size:13px'>🏢 {details['sales_center']}</div>"
                    if details.get("sales_center") else "")
 
         border_color = {"⭐⭐⭐": "#27ae60", "⭐⭐": "#2980b9", "⭐": "#95a5a6"}.get(stars, "#ddd")
 
         cards += f"""
-        <div style="border:2px solid {border_color};border-radius:8px;margin-bottom:18px;font-family:sans-serif;overflow:hidden">
-          <div style="background:#f8f9fa;padding:10px 14px;border-bottom:1px solid #eee">
-            <span style="background:{label_color};color:#fff;border-radius:3px;padding:2px 6px;font-size:11px">{p['label']}</span>
-            {reno_badge}
-            <span style="font-size:16px;margin-left:6px">{stars}</span>
-            <strong style="font-size:15px;margin-left:6px">{p['name']}</strong>
-            <span style="background:{wc};color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;margin-left:8px">{wb} {ward_name}</span>
-          </div>
-          <div style="padding:9px 14px;background:#fafafa;border-bottom:1px solid #eee;font-size:13px">
-            🚃 {commute_html}
-          </div>
-          <div style="padding:6px 14px;background:#fafafa;border-bottom:1px solid #eee;font-size:13px">
-            🚶 {walk_html} &nbsp;·&nbsp; {built_str}
-          </div>
-          <div style="padding:10px 14px">
-            <span style="font-size:16px;font-weight:bold">{p['madori']}</span>
-            &nbsp; {p['sqm']}㎡ &nbsp;·&nbsp;
-            {rent_cell}
-          </div>
+        <table width="100%" cellpadding="0" cellspacing="0"
+               style="border:2px solid {border_color};border-radius:8px;
+                      margin-bottom:18px;font-family:sans-serif;
+                      border-collapse:separate;overflow:hidden">
+          <!-- Header -->
+          <tr>
+            <td style="background:#f8f9fa;padding:10px 14px;border-bottom:1px solid #eee">
+              <div style="margin-bottom:4px">
+                <span style="background:{label_color};color:#fff;border-radius:3px;
+                             padding:2px 6px;font-size:11px">{p['label']}</span>
+                {reno_badge}
+                <span style="font-size:15px;margin-left:6px">{stars}</span>
+                <span style="background:{wc};color:#fff;border-radius:10px;
+                             padding:2px 8px;font-size:11px;margin-left:6px">{wb} {ward_name}</span>
+              </div>
+              <div style="font-size:16px;font-weight:bold;color:#222;
+                          word-break:break-all">{p['name']}</div>
+            </td>
+          </tr>
+          <!-- Commute + walk + built -->
+          <tr>
+            <td style="padding:10px 14px;background:#fafafa;border-bottom:1px solid #eee">
+              <table cellpadding="0" cellspacing="0">
+                {commute_rows}
+                {walk_rows}
+                <tr>
+                  <td style="padding:2px 0;font-size:14px">🏗</td>
+                  <td style="padding:2px 8px;font-size:14px">{built_str}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Rent -->
+          <tr>
+            <td style="padding:12px 14px">
+              <span style="font-size:18px;font-weight:bold">{p['madori']}</span>
+              <span style="font-size:14px;color:#555;margin-left:6px">{p['sqm']}㎡</span>
+              <br>
+              {rent_cell}
+            </td>
+          </tr>
           {reason_html}
-          <div style="padding:8px 14px;border-top:1px solid #eee">
-            <a href="{p['url']}"
-               style="background:{label_color};color:#fff;padding:7px 14px;border-radius:4px;
-                      text-decoration:none;font-weight:bold;font-size:14px">
-              🔗 物件詳細を見る
-            </a>
-            &nbsp;&nbsp;{maps_link}
-            {sc_html}
-          </div>
-        </div>"""
+          <!-- CTA -->
+          <tr>
+            <td style="padding:10px 14px;border-top:1px solid #eee">
+              <a href="{p['url']}"
+                 style="display:inline-block;background:{label_color};color:#fff;
+                        padding:10px 18px;border-radius:4px;text-decoration:none;
+                        font-weight:bold;font-size:15px">
+                🔗 物件詳細を見る
+              </a>
+              <br><br>
+              {maps_link}
+              {sc_html}
+            </td>
+          </tr>
+        </table>"""
 
-    html = f"""<html><body style="font-family:sans-serif;max-width:620px;margin:0 auto;padding:16px;background:#fff">
-    <h2 style="color:#2c3e50;margin-bottom:16px">🏠 {len(enriched)} New UR Listing(s)</h2>
-    {summary_table}
+    html = f"""<html><body style="font-family:sans-serif;max-width:600px;
+    margin:0 auto;padding:12px;background:#fff">
+    <h2 style="color:#2c3e50;margin-bottom:16px;font-size:20px">
+      🏠 {len(enriched)}件 新着UR物件
+    </h2>
     {cards}
-    <p style="color:#aaa;font-size:11px;margin-top:8px">
+    <p style="color:#aaa;font-size:12px;margin-top:8px">
       {datetime.now().strftime('%Y-%m-%d %H:%M')} JST ·
       max ¥{int(MAX_RENT_MAN_YEN * 10000):,}/mo · {', '.join(ALLOWED_MADORI) or 'any layout'}
     </p>
