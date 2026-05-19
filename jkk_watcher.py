@@ -453,37 +453,77 @@ def _login(page) -> bool:
 
 
 def _click_detail(page, prop_name: str) -> bool:
-    """Click the 詳細 button for the named property. Returns True if found."""
+    """Click the 詳細 button for the named property and wait for detail page."""
     print(f"  [apply] Clicking 詳細 for {prop_name}...")
-    return page.evaluate(f"""() => {{
-        for (const row of document.querySelectorAll('table tr')) {{
-            const cells = [...row.querySelectorAll('td')];
-            if (cells.length < 9) continue;
-            if (cells[1]?.innerText.trim() !== '{prop_name}') continue;
-            const btn = cells[cells.length-1]?.querySelector('input[type="image"], a');
-            if (btn) {{ btn.click(); return true; }}
-        }}
-        return false;
-    }}""")
+    try:
+        with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
+            clicked = page.evaluate(f"""() => {{
+                for (const row of document.querySelectorAll('table tr')) {{
+                    const cells = [...row.querySelectorAll('td')];
+                    if (cells.length < 9) continue;
+                    if (cells[1]?.innerText.trim() !== '{prop_name}') continue;
+                    const btn = cells[cells.length-1]?.querySelector(
+                        'img[alt="詳細"], img[src*="detail"], input[type="image"], a');
+                    if (btn) {{ btn.click(); return true; }}
+                }}
+                return false;
+            }}""")
+        if not clicked:
+            return False
+    except Exception as e:
+        print(f"  [apply] Detail click navigation issue: {e}")
+        return False
+
+    # Verify we reached the detail page
+    try:
+        page.wait_for_url("**/akiyaSenDet*", timeout=15_000)
+    except Exception:
+        print(f"  [apply] Did not reach akiyaSenDet, current URL: {page.url}")
+        return False
+
+    # Wait for the room data table to actually have rent values
+    try:
+        page.wait_for_function("""() => {
+            for (const row of document.querySelectorAll('table tr'))
+                for (const cell of row.querySelectorAll('td'))
+                    if (cell.innerText.match(/[\\d,]{6,}/)) return true;
+            return false;
+        }""", timeout=15_000)
+    except Exception:
+        print(f"  [apply] Room data table did not populate")
+        return False
+
+    return True
 
 
 def _select_room_and_apply(page, max_rent: int) -> int | None:
     """Click 申込 for the cheapest room within budget. Returns rent or None."""
     print(f"  [apply] Selecting room (max ¥{max_rent:,})...")
-    # Debug: show what numbers are found in the table
-    debug = page.evaluate("""() => {
-        const nums = [];
-        for (const row of document.querySelectorAll('table tr'))
-            for (const cell of row.querySelectorAll('td')) {
-                const m = cell.innerText.match(/[\\d,]+/);
-                if (m) {
-                    const n = parseInt(m[0].replace(/,/g,''));
-                    if (n >= 1000) nums.push(n);
+    # Try up to 3 times if table is empty (race condition with page render)
+    debug = []
+    for attempt in range(3):
+        debug = page.evaluate("""() => {
+            const nums = [];
+            for (const row of document.querySelectorAll('table tr'))
+                for (const cell of row.querySelectorAll('td')) {
+                    const m = cell.innerText.match(/[\\d,]+/);
+                    if (m) {
+                        const n = parseInt(m[0].replace(/,/g,''));
+                        if (n >= 1000) nums.push(n);
+                    }
                 }
-            }
-        return [...new Set(nums)].sort((a,b)=>a-b).slice(0,20);
-    }""")
+            return [...new Set(nums)].sort((a,b)=>a-b).slice(0,20);
+        }""")
+        if debug:
+            break
+        print(f"  [apply] Table empty (attempt {attempt+1}/3) — waiting 3s...")
+        page.wait_for_timeout(3_000)
     print(f"  [apply] Numbers found in table: {debug}")
+
+    if not debug:
+        print(f"  [apply] Page state — URL: {page.url}")
+        return None
+
     return page.evaluate(f"""() => {{
         let bestBtn = null, bestRent = {max_rent + 1};
         for (const row of document.querySelectorAll('table tr')) {{
@@ -659,8 +699,6 @@ def scrape_and_apply_session(autoapply: dict, seen: set) -> tuple[list, list]:
                     if not _click_detail(page, pname):
                         result["error"] = "Not found (already taken?)"
                         apply_results.append(result); continue
-
-                    page.wait_for_selector('table', timeout=15_000)
 
                     # Click 申込 — server redirects to login
                     max_rent = 9_999_999 if JKK_TEST_PROPERTY else MAX_RENT_YEN
