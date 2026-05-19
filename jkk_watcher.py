@@ -33,7 +33,7 @@ JKK_ID             = os.environ.get("JKK_ID", "").strip()
 JKK_PASSWORD       = os.environ.get("JKK_PASSWORD", "").strip()
 JKK_DRY_RUN        = os.environ.get("JKK_DRY_RUN", "").lower() == "true"
 JKK_TEST_PROPERTY  = os.environ.get("JKK_TEST_PROPERTY", "").strip()
-LINE_USER_ID       = os.environ.get("LINE_USER_ID", "").strip()
+JKK_VISIBLE        = os.environ.get("JKK_VISIBLE", "").lower() == "true"
 
 # ─── Ward tiers ───────────────────────────────────────────────────────────────
 
@@ -406,7 +406,9 @@ def load_autoapply() -> dict:
 
 def _make_ctx(pw):
     browser = pw.chromium.launch(
-        headless=True, args=["--disable-blink-features=AutomationControlled"]
+        headless=not JKK_VISIBLE,
+        slow_mo=500 if JKK_VISIBLE else 0,
+        args=["--disable-blink-features=AutomationControlled"]
     )
     ctx = browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -447,31 +449,61 @@ def _login(page) -> bool:
     page.wait_for_timeout(2_000)
     print(f"  [login] After login: {page.url}")
     return True
-    login_page.wait_for_selector('body', timeout=10_000)
-    print(f"  [login] Logged in at: {login_page.url}")
-    return login_page
 
 
 def _click_detail(page, prop_name: str) -> bool:
-    """Click the 詳細 button for the named property and wait for detail page."""
+    """Click the 詳細 button for the named property and wait for detail page.
+    Paginates through results pages if the property isn't on page 1."""
     print(f"  [apply] Clicking 詳細 for {prop_name}...")
-    try:
-        with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
-            clicked = page.evaluate(f"""() => {{
-                for (const row of document.querySelectorAll('table tr')) {{
-                    const cells = [...row.querySelectorAll('td')];
-                    if (cells.length < 9) continue;
-                    if (cells[1]?.innerText.trim() !== '{prop_name}') continue;
-                    const btn = cells[cells.length-1]?.querySelector(
-                        'img[alt="詳細"], img[src*="detail"], input[type="image"], a');
-                    if (btn) {{ btn.click(); return true; }}
-                }}
-                return false;
-            }}""")
-        if not clicked:
+
+    for pg in range(1, 11):
+        # Check if property exists on current page WITHOUT triggering navigation
+        has_prop = page.evaluate(f"""() => {{
+            for (const row of document.querySelectorAll('table tr')) {{
+                const cells = [...row.querySelectorAll('td')];
+                if (cells.length < 9) continue;
+                if (cells[1]?.innerText.trim() === '{prop_name}') return true;
+            }}
+            return false;
+        }}""")
+
+        if has_prop:
+            # Property found — now click 詳細 and wait for navigation
+            with page.expect_navigation(wait_until="domcontentloaded", timeout=15_000):
+                page.evaluate(f"""() => {{
+                    for (const row of document.querySelectorAll('table tr')) {{
+                        const cells = [...row.querySelectorAll('td')];
+                        if (cells.length < 9) continue;
+                        if (cells[1]?.innerText.trim() !== '{prop_name}') continue;
+                        const btn = cells[cells.length-1]?.querySelector(
+                            'img[alt="詳細"], img[src*="detail"], input[type="image"], a');
+                        if (btn) {{ btn.click(); return; }}
+                    }}
+                }}""")
+            break
+
+        # Not on this page — go to next page
+        next_pg = pg + 1
+        has_next = page.evaluate(f"""() => {{
+            for (const el of document.querySelectorAll('a'))
+                if (el.innerText.trim() === '{next_pg}') return true;
+            return false;
+        }}""")
+        if not has_next:
+            print(f"  [apply] {prop_name} not found across {pg} page(s)")
             return False
-    except Exception as e:
-        print(f"  [apply] Detail click navigation issue: {e}")
+
+        try:
+            with page.expect_navigation(wait_until="domcontentloaded", timeout=12_000):
+                page.evaluate(f"""() => {{
+                    for (const el of document.querySelectorAll('a'))
+                        if (el.innerText.trim() === '{next_pg}') {{ el.click(); return; }}
+                }}""")
+            page.wait_for_selector('table', timeout=10_000)
+        except Exception:
+            print(f"  [apply] Pagination error looking for {prop_name}")
+            return False
+    else:
         return False
 
     # Verify we reached the detail page
